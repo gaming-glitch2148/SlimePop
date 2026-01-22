@@ -1,17 +1,26 @@
 package com.slimepop.asmr
 
+import android.app.Activity
+import android.content.Intent
+import android.graphics.Color
 import android.media.AudioAttributes
 import android.media.SoundPool
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
+import android.view.View
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import com.google.android.gms.games.PlayGames
 import com.slimepop.asmr.databinding.ActivityMainBinding
-import java.time.LocalDate
-import java.time.temporal.ChronoUnit
+import java.text.SimpleDateFormat
+import java.util.*
+import kotlin.math.roundToInt
 
 class MainActivity : AppCompatActivity() {
 
@@ -35,13 +44,63 @@ class MainActivity : AppCompatActivity() {
 
     private var questState: QuestState? = null
 
-    private val REQ_SHOP = 2001
+    private val shopLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val data = result.data ?: return@registerForActivityResult
+
+            data.getStringExtra(ShopActivity.RESULT_BUY_PRODUCT)?.let { productId ->
+                if (!hasNetwork()) {
+                    toast("Offline: purchases unavailable")
+                    return@registerForActivityResult
+                }
+                billing.launchPurchase(this, productId)
+            }
+
+            data.getStringExtra(ShopActivity.RESULT_EQUIP_SKIN)?.let { id ->
+                if (!entitlements.ownsSkin(id)) { toast("Not owned"); return@registerForActivityResult }
+                equippedSkinId = id
+                Prefs.setEquippedSkinId(this, equippedSkinId)
+                applyEquippedSkinToView()
+                updateTopUI()
+                CloudSaveManager.saveToCloud(this)
+            }
+
+            data.getStringExtra(ShopActivity.RESULT_EQUIP_SOUND)?.let { id ->
+                if (!entitlements.ownsSound(id)) { toast("Not owned"); return@registerForActivityResult }
+                equippedSoundId = id
+                Prefs.setEquippedSoundId(this, equippedSoundId)
+                applySoundscape()
+                updateTopUI()
+                CloudSaveManager.saveToCloud(this)
+            }
+        }
+    }
     private val boostDurationMs = 60_000L
+
+    private fun getTodayIso(): String {
+        return try {
+            SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        } catch (e: Exception) {
+            "2024-01-01"
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        vb = ActivityMainBinding.inflate(layoutInflater)
-        setContentView(vb.root)
+        
+        Log.d("SlimePop", "MainActivity onCreate started")
+
+        try {
+            vb = ActivityMainBinding.inflate(layoutInflater)
+            setContentView(vb.root)
+            vb.root.setBackgroundColor(Color.parseColor("#1C2632"))
+            vb.slimeView.visibility = View.VISIBLE
+        } catch (e: Exception) {
+            Log.e("SlimePop", "Inflation error", e)
+            return
+        }
 
         coins = Prefs.getCoins(this)
         soundEnabled = Prefs.getSound(this)
@@ -59,20 +118,28 @@ class MainActivity : AppCompatActivity() {
         soundscape = SoundscapeManager(this)
 
         ads = AdManager(this, this)
-        ads.adsEnabled = !entitlements.adsRemoved
-        ads.init()
-
         billing = BillingManager(this) { ent ->
             entitlements = ent
             applyEntitlements()
+            CloudSaveManager.saveToCloud(this)
         }
-        billing.start()
+
+        Handler(Looper.getMainLooper()).postDelayed({
+            try {
+                Log.d("SlimePop", "Initializing SDKs...")
+                ads.adsEnabled = !entitlements.adsRemoved
+                ads.init()
+                billing.start()
+                checkCloudSave()
+            } catch (e: Exception) {
+                Log.e("SlimePop", "SDK Init error", e)
+            }
+        }, 1000)
 
         vb.btnToggleSound.text = if (soundEnabled) "Sound: ON" else "Sound: OFF"
 
         applyEntitlements()
         applyEquippedSkinToView()
-        applySoundscape()
 
         vb.slimeView.onPop = { baseCoins, holdMs ->
             val multiplier = if (!entitlements.adsRemoved && SystemClock.elapsedRealtime() < boostUntilMs) 2 else 1
@@ -84,8 +151,8 @@ class MainActivity : AppCompatActivity() {
             Prefs.setTotalPops(this, Prefs.getTotalPops(this) + 1)
             Prefs.setTotalHoldMs(this, Prefs.getTotalHoldMs(this) + holdMs)
 
-            questState = QuestManager.applyPop(this, questState ?: QuestManager.loadOrInit(this), 1)
-            questState = QuestManager.applyHoldMs(this, questState!!, holdMs)
+            // Optimized Quest update (one save instead of two)
+            questState = QuestManager.updateProgress(this, questState ?: QuestManager.loadOrInit(this), 1, holdMs)
 
             if (soundEnabled && popSoundId != 0) {
                 soundPool?.play(popSoundId, 0.6f, 0.6f, 1, 0, 1.0f)
@@ -100,6 +167,11 @@ class MainActivity : AppCompatActivity() {
                 streak = Prefs.getDailyStreak(this),
                 totalPops = Prefs.getTotalPops(this)
             )
+            
+            // Periodically save to cloud
+            if (Prefs.getTotalPops(this) % 50 == 0) {
+                CloudSaveManager.saveToCloud(this)
+            }
         }
 
         vb.btnToggleSound.setOnClickListener {
@@ -112,11 +184,12 @@ class MainActivity : AppCompatActivity() {
         vb.btnDaily.setOnClickListener { showDailyAndQuestsDialog() }
 
         vb.btnShop.setOnClickListener {
-            val i = android.content.Intent(this, ShopActivity::class.java)
+            val i = Intent(this, ShopActivity::class.java)
                 .putExtra(ShopActivity.EXTRA_OWNED_PRODUCTS_CSV, Prefs.getOwnedIapCsv(this))
                 .putExtra(ShopActivity.EXTRA_EQUIPPED_SKIN, equippedSkinId)
                 .putExtra(ShopActivity.EXTRA_EQUIPPED_SOUND, equippedSoundId)
-            startActivityForResult(i, REQ_SHOP)
+
+            shopLauncher.launch(i)
         }
 
         vb.btnRewardedBoost.setOnClickListener {
@@ -138,64 +211,70 @@ class MainActivity : AppCompatActivity() {
         vb.btnRelax.setOnClickListener {
             if (!entitlements.adsRemoved) ads.showInterstitialIfReady()
             toast("Relax mode on. Press & hold the slime.")
+            applySoundscape() 
+        }
+
+        vb.tvPrivacy.setOnClickListener {
+            startActivity(Intent(this, PrivacyActivity::class.java))
         }
 
         maybeShowRemoveAdsReminder()
         updateTopUI()
+        
+        Log.d("SlimePop", "MainActivity onCreate finished")
+    }
+
+    private fun checkCloudSave() {
+        PlayGames.getGamesSignInClient(this).isAuthenticated.addOnSuccessListener { result ->
+            if (result.isAuthenticated) {
+                CloudSaveManager.loadFromCloud(this) {
+                    runOnUiThread {
+                        coins = Prefs.getCoins(this)
+                        equippedSkinId = Prefs.getEquippedSkinId(this)
+                        equippedSoundId = Prefs.getEquippedSoundId(this)
+                        
+                        val ownedCsv = Prefs.getOwnedIapCsv(this)
+                        val ownedSet = EntitlementResolver.ownedSetFromCsv(ownedCsv)
+                        entitlements = EntitlementResolver.resolveFromOwnedProducts(ownedSet)
+                        
+                        applyEntitlements()
+                        applyEquippedSkinToView()
+                        applySoundscape()
+                        updateTopUI()
+                        toast("Progress restored from cloud")
+                    }
+                }
+            }
+        }
     }
 
     override fun onDestroy() {
-        billing.end()
-        soundscape.stop()
-        soundPool?.release()
+        try {
+            CloudSaveManager.saveToCloud(this)
+            billing.end()
+            soundscape.stop()
+            soundPool?.release()
+        } catch (_: Exception) {}
         soundPool = null
         super.onDestroy()
     }
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != REQ_SHOP || resultCode != RESULT_OK || data == null) return
-
-        data.getStringExtra(ShopActivity.RESULT_BUY_PRODUCT)?.let { productId ->
-            if (!hasNetwork()) {
-                toast("Offline: purchases unavailable")
-                return
-            }
-            billing.launchPurchase(this, productId)
-            return
-        }
-
-        data.getStringExtra(ShopActivity.RESULT_EQUIP_SKIN)?.let { id ->
-            if (!entitlements.ownsSkin(id)) { toast("Not owned"); return }
-            equippedSkinId = id
-            Prefs.setEquippedSkinId(this, equippedSkinId)
-            applyEquippedSkinToView()
-            updateTopUI()
-            return
-        }
-
-        data.getStringExtra(ShopActivity.RESULT_EQUIP_SOUND)?.let { id ->
-            if (!entitlements.ownsSound(id)) { toast("Not owned"); return }
-            equippedSoundId = id
-            Prefs.setEquippedSoundId(this, equippedSoundId)
-            applySoundscape()
-            updateTopUI()
-            return
-        }
-    }
-
     private fun updateTopUI() {
         vb.tvCoins.text = "Coins: $coins"
+        vb.tvCoins.setTextColor(Color.WHITE)
 
         val skinName = ContentNames.skinNameFor(equippedSkinId)
         val soundName = ContentNames.soundNameFor(equippedSoundId)
 
-        val dailyReady = Prefs.getDailyClaimDate(this) != LocalDate.now().toString()
+        val dailyReady = Prefs.getDailyClaimDate(this) != getTodayIso()
         val q = questState ?: QuestManager.loadOrInit(this)
         val quests = QuestManager.todaysQuests()
         val completed = quests.count { QuestManager.canClaim(it, q) }
         vb.tvEquipped.text = "Skin: $skinName | Sound: $soundName"
+        vb.tvEquipped.setTextColor(Color.parseColor("#BBBBBB"))
+        
         vb.tvDaily.text = "Daily: ${if (dailyReady) "ready" else "claimed"} · Quests: $completed ready"
+        vb.tvDaily.setTextColor(Color.parseColor("#BBBBBB"))
 
         if (entitlements.adsRemoved) {
             vb.btnRewardedBoost.isEnabled = false
@@ -242,7 +321,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showDailyAndQuestsDialog() {
-        val todayIso = LocalDate.now().toString()
+        val todayIso = getTodayIso()
         val lastClaim = Prefs.getDailyClaimDate(this)
         val canClaim = lastClaim != todayIso
 
@@ -295,7 +374,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun claimDaily(todayIso: String, amount: Int) {
         val last = Prefs.getDailyClaimDate(this)
-        val yesterday = LocalDate.now().minusDays(1).toString()
+        val cal = Calendar.getInstance()
+        cal.add(Calendar.DAY_OF_YEAR, -1)
+        val yesterday = try { SimpleDateFormat("yyyy-MM-dd", Locale.US).format(cal.time) } catch(e:Exception) { "" }
+        
         val newStreak = if (last == yesterday) Prefs.getDailyStreak(this) + 1 else 1
 
         Prefs.setDailyClaimDate(this, todayIso)
@@ -306,6 +388,7 @@ class MainActivity : AppCompatActivity() {
 
         updateTopUI()
         toast("Claimed $amount (streak: $newStreak)")
+        CloudSaveManager.saveToCloud(this)
     }
 
     private fun claimReadyQuests() {
@@ -322,6 +405,7 @@ class MainActivity : AppCompatActivity() {
         questState = st
         updateTopUI()
         toast(if (claimedAny) "Quest rewards claimed" else "No quests ready yet")
+        if (claimedAny) CloudSaveManager.saveToCloud(this)
     }
 
     private fun maybeShowRemoveAdsReminder() {
@@ -330,32 +414,53 @@ class MainActivity : AppCompatActivity() {
         val launches = Prefs.getLaunchCount(this) + 1
         Prefs.setLaunchCount(this, launches)
 
-        val today = LocalDate.now()
+        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+        val today = Date()
         val lastIso = Prefs.getUpsellLastIso(this)
-        val last = lastIso?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+        val lastDate = lastIso?.let { try { sdf.parse(it) } catch(e: Exception) { null } }
 
         val showByLaunch = launches == 2 || launches == 5 || launches == 10
-        val showByWeek = last == null || ChronoUnit.DAYS.between(last, today) >= 7
+        
+        var showByWeek = false
+        if (lastDate == null) {
+            showByWeek = true
+        } else {
+            val diff = today.time - lastDate.time
+            val days = diff / (1000 * 60 * 60 * 24)
+            if (days >= 7) showByWeek = true
+        }
 
         if (!(showByLaunch || showByWeek)) return
 
-        Prefs.setUpsellLastIso(this, today.toString())
-        AlertDialog.Builder(this)
-            .setTitle("Go Ad-Free")
-            .setMessage("One-time $4.99 purchase removes all ads forever.")
-            .setPositiveButton("Buy") { _, _ ->
-                if (!hasNetwork()) toast("Offline: purchases unavailable")
-                else billing.launchPurchase(this, Catalog.REMOVE_ADS)
+        Prefs.setUpsellLastIso(this, try { sdf.format(today) } catch(e:Exception) { "" })
+        
+        Handler(Looper.getMainLooper()).postDelayed({
+            if (!isFinishing) {
+                AlertDialog.Builder(this)
+                    .setTitle("Go Ad-Free")
+                    .setMessage("One-time $4.99 purchase removes all ads forever.")
+                    .setCancelable(true)
+                    .setPositiveButton("Buy") { _, _ ->
+                        if (!hasNetwork()) toast("Offline: purchases unavailable")
+                        else billing.launchPurchase(this, Catalog.REMOVE_ADS)
+                    }
+                    .setNegativeButton("Not now") { dialog, _ ->
+                        dialog.dismiss()
+                    }
+                    .show()
             }
-            .setNegativeButton("Not now", null)
-            .show()
+        }, 3000)
     }
 
     private fun hasNetwork(): Boolean {
-        val cm = getSystemService(ConnectivityManager::class.java)
-        val net = cm.activeNetwork ?: return false
-        val caps = cm.getNetworkCapabilities(net) ?: return false
-        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        return try {
+            val cm = getSystemService(ConnectivityManager::class.java)
+            val net = cm.activeNetwork ?: return false
+            val caps = cm.getNetworkCapabilities(net) ?: return false
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        } catch (e: Exception) {
+            false
+        }
     }
 
     private fun setupPopSound() {
@@ -369,10 +474,17 @@ class MainActivity : AppCompatActivity() {
             .setAudioAttributes(attrs)
             .build()
 
+        // Using direct R reference is better than getIdentifier
         popSoundId = try {
-            val id = resources.getIdentifier("pop", "raw", packageName)
+            val id = R.raw.pop
             if (id != 0) soundPool!!.load(this, id, 1) else 0
-        } catch (_: Exception) { 0 }
+        } catch (_: Exception) {
+            // Fallback just in case
+            try {
+                val id = resources.getIdentifier("pop", "raw", packageName)
+                if (id != 0) soundPool!!.load(this, id, 1) else 0
+            } catch (_: Exception) { 0 }
+        }
     }
 
     private fun toast(msg: String) {

@@ -2,6 +2,7 @@ package com.slimepop.asmr
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.MenuItem
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.widget.doAfterTextChanged
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -35,6 +36,11 @@ class ShopActivity : AppCompatActivity() {
         vb = ActivityShopBinding.inflate(layoutInflater)
         setContentView(vb.root)
 
+        // Enable Back Button in Toolbar
+        setSupportActionBar(vb.toolbar)
+        supportActionBar?.setDisplayHomeAsUpEnabled(true)
+        supportActionBar?.title = "Shop"
+
         equippedSkin = intent.getStringExtra(EXTRA_EQUIPPED_SKIN) ?: "skin_001"
         equippedSound = intent.getStringExtra(EXTRA_EQUIPPED_SOUND) ?: "sound_001"
 
@@ -55,7 +61,11 @@ class ShopActivity : AppCompatActivity() {
                 )
             },
             onBuy = { item ->
-                setResult(RESULT_OK, Intent().putExtra(RESULT_BUY_PRODUCT, item.productId))
+                // IMPORTANT: Returning RESULT_OK with RESULT_BUY_PRODUCT tells MainActivity to start the billing flow
+                val data = Intent().apply {
+                    putExtra(RESULT_BUY_PRODUCT, item.productId)
+                }
+                setResult(RESULT_OK, data)
                 finish()
             },
             onEquip = { item ->
@@ -84,6 +94,14 @@ class ShopActivity : AppCompatActivity() {
         }
 
         refresh()
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        if (item.itemId == android.R.id.home) {
+            finish() // Handle back button click
+            return true
+        }
+        return super.onOptionsItemSelected(item)
     }
 
     private fun setupTabs() {

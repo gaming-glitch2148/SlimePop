@@ -29,6 +29,12 @@ android {
         }
     }
 
+    sourceSets {
+        getByName("main") {
+            res.setSrcDirs(listOf("src/main/res"))
+        }
+    }
+
     buildFeatures {
         viewBinding = true
     }
@@ -51,6 +57,7 @@ dependencies {
     implementation(libs.androidx.constraintlayout)
     implementation(libs.androidx.recyclerview)
     implementation(libs.play.services.ads)
+    implementation(libs.play.services.games.v2) // Added Play Games Services v2
     implementation(libs.billing.ktx)
     implementation(libs.play.review.ktx)
     coreLibraryDesugaring(libs.desugar.jdk.libs)

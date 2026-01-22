@@ -79,9 +79,9 @@ class BillingManager(
             .build()
 
         client?.queryProductDetailsAsync(params) { result, list ->
-            if (result.responseCode == BillingClient.BillingResponseCode.OK && list != null) {
+            if (result.responseCode == BillingClient.BillingResponseCode.OK) {
                 detailsById.clear()
-                list.forEach { detailsById[it.productId] = it }
+                list?.forEach { detailsById[it.productId] = it }
             }
         }
     }

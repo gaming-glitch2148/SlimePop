@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.SystemClock
+import android.util.Log
 import com.google.android.gms.ads.*
 import com.google.android.gms.ads.interstitial.InterstitialAd
 import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback
@@ -42,7 +43,9 @@ class AdManager(
         }
 
     fun init() {
-        MobileAds.initialize(context) {}
+        MobileAds.initialize(context) { status ->
+            Log.d("AdManager", "MobileAds initialized: $status")
+        }
         if (adsEnabled) {
             loadInterstitial()
             loadRewarded()
@@ -67,13 +70,50 @@ class AdManager(
 
     fun showInterstitialIfReady() {
         if (!adsEnabled || !hasNetwork()) return
-        val ad = interstitialAd ?: return
+        val ad = interstitialAd ?: run {
+            loadInterstitial()
+            return
+        }
+        
+        ad.fullScreenContentCallback = object : FullScreenContentCallback() {
+            override fun onAdDismissedFullScreenContent() {
+                Log.d("AdManager", "Interstitial dismissed")
+                interstitialAd = null
+                loadInterstitial()
+            }
+            override fun onAdFailedToShowFullScreenContent(adError: AdError) {
+                Log.e("AdManager", "Interstitial failed to show: ${adError.message}")
+                interstitialAd = null
+                loadInterstitial()
+            }
+            override fun onAdShowedFullScreenContent() {
+                lastInterstitialShownMs = SystemClock.elapsedRealtime()
+                Prefs.setLastIntMs(context, lastInterstitialShownMs)
+            }
+        }
         ad.show(activity)
     }
 
     fun showRewarded(onReward: (RewardItem) -> Unit, onNotReady: () -> Unit) {
         if (!adsEnabled || !hasNetwork()) { onNotReady(); return }
-        val ad = rewardedAd ?: run { onNotReady(); return }
+        val ad = rewardedAd ?: run { 
+            loadRewarded()
+            onNotReady()
+            return 
+        }
+
+        ad.fullScreenContentCallback = object : FullScreenContentCallback() {
+            override fun onAdDismissedFullScreenContent() {
+                Log.d("AdManager", "Rewarded dismissed")
+                rewardedAd = null
+                loadRewarded()
+            }
+            override fun onAdFailedToShowFullScreenContent(adError: AdError) {
+                Log.e("AdManager", "Rewarded failed to show: ${adError.message}")
+                rewardedAd = null
+                loadRewarded()
+            }
+        }
         ad.show(activity) { reward -> onReward(reward) }
     }
 
@@ -83,23 +123,11 @@ class AdManager(
         InterstitialAd.load(context, TEST_INTERSTITIAL_ID, request,
             object : InterstitialAdLoadCallback() {
                 override fun onAdLoaded(ad: InterstitialAd) {
+                    Log.d("AdManager", "Interstitial loaded")
                     interstitialAd = ad
-                    interstitialAd?.fullScreenContentCallback = object : FullScreenContentCallback() {
-                        override fun onAdDismissedFullScreenContent() {
-                            interstitialAd = null
-                            loadInterstitial()
-                        }
-                        override fun onAdFailedToShowFullScreenContent(adError: AdError) {
-                            interstitialAd = null
-                            loadInterstitial()
-                        }
-                        override fun onAdShowedFullScreenContent() {
-                            lastInterstitialShownMs = SystemClock.elapsedRealtime()
-                            Prefs.setLastIntMs(context, lastInterstitialShownMs)
-                        }
-                    }
                 }
                 override fun onAdFailedToLoad(adError: LoadAdError) {
+                    Log.e("AdManager", "Interstitial failed to load: ${adError.message}")
                     interstitialAd = null
                 }
             }
@@ -112,19 +140,11 @@ class AdManager(
         RewardedAd.load(context, TEST_REWARDED_ID, request,
             object : RewardedAdLoadCallback() {
                 override fun onAdLoaded(ad: RewardedAd) {
+                    Log.d("AdManager", "Rewarded loaded")
                     rewardedAd = ad
-                    rewardedAd?.fullScreenContentCallback = object : FullScreenContentCallback() {
-                        override fun onAdDismissedFullScreenContent() {
-                            rewardedAd = null
-                            loadRewarded()
-                        }
-                        override fun onAdFailedToShowFullScreenContent(adError: AdError) {
-                            rewardedAd = null
-                            loadRewarded()
-                        }
-                    }
                 }
                 override fun onAdFailedToLoad(adError: LoadAdError) {
+                    Log.e("AdManager", "Rewarded failed to load: ${adError.message}")
                     rewardedAd = null
                 }
             }
@@ -132,9 +152,13 @@ class AdManager(
     }
 
     private fun hasNetwork(): Boolean {
-        val cm = context.getSystemService(ConnectivityManager::class.java)
-        val net = cm.activeNetwork ?: return false
-        val caps = cm.getNetworkCapabilities(net) ?: return false
-        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        return try {
+            val cm = context.getSystemService(ConnectivityManager::class.java)
+            val net = cm.activeNetwork ?: return false
+            val caps = cm.getNetworkCapabilities(net) ?: return false
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        } catch (e: Exception) {
+            false
+        }
     }
 }

@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">Slime Pop</string>
+    <!-- Replace this with your actual Play Console Project ID -->
+    <string name="game_services_project_id" translatable="false">0000000000</string>
 </resources>

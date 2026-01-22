@@ -1,6 +1,7 @@
 package com.slimepop.asmr
 
 import android.content.Context
+import android.content.SharedPreferences
 
 object Prefs {
     private const val FILE = "slime_pop_prefs"
@@ -33,7 +34,13 @@ object Prefs {
     private const val K_QUEST_PROGRESS_CSV = "quest_progress_csv"
     private const val K_QUEST_CLAIMED_CSV = "quest_claimed_csv"
 
-    private fun sp(ctx: Context) = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+    private var cachedSp: SharedPreferences? = null
+
+    private fun sp(ctx: Context): SharedPreferences {
+        return cachedSp ?: synchronized(this) {
+            cachedSp ?: ctx.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE).also { cachedSp = it }
+        }
+    }
 
     fun getCoins(ctx: Context) = sp(ctx).getInt(K_COINS, 0)
     fun setCoins(ctx: Context, v: Int) = sp(ctx).edit().putInt(K_COINS, v).apply()

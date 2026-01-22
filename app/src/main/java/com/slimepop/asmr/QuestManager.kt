@@ -1,7 +1,8 @@
 package com.slimepop.asmr
 
 import android.content.Context
-import java.time.LocalDate
+import java.text.SimpleDateFormat
+import java.util.*
 
 enum class QuestType { POPS_25, POPS_60, HOLD_MS_10000 }
 
@@ -21,6 +22,10 @@ data class QuestState(
 
 object QuestManager {
 
+    private fun getTodayIso(): String {
+        return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+    }
+
     fun todaysQuests(): List<Quest> {
         return listOf(
             Quest(0, QuestType.POPS_25, "Pop 25 times", 25, 80),
@@ -30,7 +35,7 @@ object QuestManager {
     }
 
     fun loadOrInit(ctx: Context): QuestState {
-        val today = LocalDate.now().toString()
+        val today = getTodayIso()
         val savedDate = Prefs.getQuestDate(ctx)
         if (savedDate != today) {
             val st = QuestState(today, longArrayOf(0,0,0), booleanArrayOf(false,false,false))
@@ -48,16 +53,10 @@ object QuestManager {
         Prefs.setQuestClaimedCsv(ctx, "q0=${if (st.claimed[0]) 1 else 0},q1=${if (st.claimed[1]) 1 else 0},q2=${if (st.claimed[2]) 1 else 0}")
     }
 
-    fun applyPop(ctx: Context, st: QuestState, count: Int = 1): QuestState {
+    fun updateProgress(ctx: Context, st: QuestState, popCount: Int, holdMs: Long): QuestState {
         val out = st.copy(progress = st.progress.clone(), claimed = st.claimed.clone())
-        out.progress[0] += count.toLong()
-        out.progress[1] += count.toLong()
-        save(ctx, out)
-        return out
-    }
-
-    fun applyHoldMs(ctx: Context, st: QuestState, holdMs: Long): QuestState {
-        val out = st.copy(progress = st.progress.clone(), claimed = st.claimed.clone())
+        out.progress[0] += popCount.toLong()
+        out.progress[1] += popCount.toLong()
         out.progress[2] += holdMs
         save(ctx, out)
         return out
@@ -78,6 +77,7 @@ object QuestManager {
 
     private fun parseCsvLongs(csv: String, defaultSize: Int): LongArray {
         val arr = LongArray(defaultSize) { 0L }
+        if (csv.isEmpty()) return arr
         csv.split(",").forEach { token ->
             val parts = token.split("=")
             if (parts.size == 2) {
@@ -92,6 +92,7 @@ object QuestManager {
 
     private fun parseCsvBools(csv: String, defaultSize: Int): BooleanArray {
         val arr = BooleanArray(defaultSize) { false }
+        if (csv.isEmpty()) return arr
         csv.split(",").forEach { token ->
             val parts = token.split("=")
             if (parts.size == 2) {
