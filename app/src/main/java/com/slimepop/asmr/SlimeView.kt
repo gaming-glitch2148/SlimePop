@@ -68,6 +68,11 @@ class SlimeView @JvmOverloads constructor(
         }
     }
 
+    fun setSkin(skinId: String) {
+        val index = skinId.removePrefix("skin_").toIntOrNull()?.minus(1) ?: 0
+        setSkinIndex(index)
+    }
+
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         if (w > 0 && h > 0) {
             cx = w / 2f

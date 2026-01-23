@@ -1,5 +1,6 @@
 package com.slimepop.asmr
 
+import android.app.Activity
 import android.content.Context
 import android.util.Log
 import com.google.android.gms.games.PlayGames
@@ -7,14 +8,14 @@ import com.google.android.gms.games.SnapshotsClient
 import com.google.android.gms.games.snapshot.Snapshot
 import com.google.android.gms.games.snapshot.SnapshotMetadataChange
 import org.json.JSONObject
-import java.io.IOException
 
 object CloudSaveManager {
     private const val TAG = "CloudSaveManager"
     private const val SAVE_NAME = "slime_pop_progress"
 
     fun saveToCloud(context: Context) {
-        val snapshotsClient = PlayGames.getSnapshotsClient(context)
+        val activity = context as? Activity ?: return
+        val snapshotsClient = PlayGames.getSnapshotsClient(activity)
         
         val data = JSONObject().apply {
             put("coins", Prefs.getCoins(context))
@@ -33,7 +34,7 @@ object CloudSaveManager {
             }
     }
 
-    private fun writeSnapshot(client: SnapshotsClient, snapshot: Snapshot, data: byte[]) {
+    private fun writeSnapshot(client: SnapshotsClient, snapshot: Snapshot, data: ByteArray) {
         snapshot.snapshotContents.writeBytes(data)
         val metadataChange = SnapshotMetadataChange.Builder()
             .setDescription("Slime Pop Progress")
@@ -43,7 +44,8 @@ object CloudSaveManager {
     }
 
     fun loadFromCloud(context: Context, onLoaded: () -> Unit) {
-        val snapshotsClient = PlayGames.getSnapshotsClient(context)
+        val activity = context as? Activity ?: return
+        val snapshotsClient = PlayGames.getSnapshotsClient(activity)
         snapshotsClient.open(SAVE_NAME, true, SnapshotsClient.RESOLUTION_POLICY_MOST_RECENTLY_MODIFIED)
             .addOnSuccessListener { result ->
                 val snapshot = result.data

@@ -1,21 +1,33 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# Slime Pop ProGuard Rules
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# 1. Keep Play Games Services v2
+-keep class com.google.android.gms.games.** { *; }
+-keep class com.google.android.gms.common.api.** { *; }
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# 2. Keep Billing Library
+-keep class com.android.billingclient.api.** { *; }
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# 3. Keep AdMob (Play Services Ads)
+-keep class com.google.android.gms.ads.** { *; }
+-keep class com.google.ads.** { *; }
+
+# 4. Keep Play Review Library
+-keep class com.google.android.play.core.review.** { *; }
+-keep class com.google.android.play.core.tasks.** { *; }
+
+# 5. Keep ViewBinding classes (to avoid crashes if layout names are obfuscated)
+-keep class com.slimepop.asmr.databinding.** { *; }
+
+# 6. Keep our App's core logic that interacts with external SDKs
+-keep class com.slimepop.asmr.Prefs { *; }
+-keep class com.slimepop.asmr.Catalog { *; }
+-keep class com.slimepop.asmr.Entitlements { *; }
+-keep class com.slimepop.asmr.QuestState { *; }
+
+# General optimization settings
+-keepattributes SourceFile,LineNumberTable,*Annotation*
+-keep public class * extends android.app.Activity
+-keep public class * extends android.app.Application
+-keep public class * extends android.app.Service
+-keep public class * extends android.content.BroadcastReceiver
+-keep public class * extends android.content.ContentProvider
