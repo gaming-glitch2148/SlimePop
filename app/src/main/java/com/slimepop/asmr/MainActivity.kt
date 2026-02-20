@@ -103,11 +103,22 @@ class MainActivity : AppCompatActivity() {
         audio = SlimeAudioManager(this)
         adManager = AdManager(this, this)
 
-        billing = BillingManager(this) { newEnt ->
-            entitlements = newEnt
-            refreshEntitlements()
-            adManager.adsEnabled = !entitlements.adsRemoved
-        }
+        billing = BillingManager(
+            context = this,
+            onEntitlements = { newEnt ->
+                runOnUiThread {
+                    entitlements = newEnt
+                    refreshEntitlements()
+                    adManager.adsEnabled = !entitlements.adsRemoved
+                    updateTopUI()
+                }
+            },
+            onCatalogUpdated = {
+                runOnUiThread {
+                    updateTopUI()
+                }
+            }
+        )
         billing.start()
 
         coins = Prefs.getCoins(this)
@@ -138,6 +149,19 @@ class MainActivity : AppCompatActivity() {
                 putExtra(ShopActivity.EXTRA_OWNED_PRODUCTS_CSV, Prefs.getOwnedIapCsv(this@MainActivity))
             }
             shopLauncher.launch(intent)
+        }
+
+        vb.btnRemoveAds.setOnClickListener {
+            if (entitlements.adsRemoved) {
+                Toast.makeText(this, "Ads are already removed.", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            val launched = billing.launchPurchase(this, Catalog.REMOVE_ADS)
+            if (!launched) {
+                val reason = billing.checkoutBlockingReason(Catalog.REMOVE_ADS)
+                    ?: "Google Play is connecting. Try again in a moment."
+                Toast.makeText(this, reason, Toast.LENGTH_SHORT).show()
+            }
         }
 
         vb.btnToggleSound.setOnClickListener {
@@ -227,7 +251,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateSound() {
         val enabled = Prefs.getSound(this)
-        vb.btnToggleSound.text = if (enabled) "Sound: ON" else "Sound: OFF"
+        vb.btnToggleSound.setImageResource(
+            if (enabled) android.R.drawable.ic_lock_silent_mode_off
+            else android.R.drawable.ic_lock_silent_mode
+        )
+        vb.btnToggleSound.contentDescription = if (enabled) "Sound on" else "Sound off"
         if (enabled) {
             val resId = SoundLibrary.soundpackResId(this, equippedSoundId)
             if (resId != 0) {
@@ -292,6 +320,17 @@ class MainActivity : AppCompatActivity() {
         val multTag = if (mult > 1) " (x$mult)" else ""
         vb.tvCoins.text = "Coins: $coins$multTag"
         vb.tvEquipped.text = "Skin: $equippedSkinId | Sound: $equippedSoundId"
+
+        if (entitlements.adsRemoved) {
+            vb.btnRemoveAds.text = "Ads Removed"
+            vb.btnRemoveAds.isEnabled = false
+            vb.btnRemoveAds.alpha = 0.8f
+        } else {
+            val ready = billing.canPurchase(Catalog.REMOVE_ADS)
+            vb.btnRemoveAds.text = if (ready) "Remove Ads" else "Remove Ads (Loading...)"
+            vb.btnRemoveAds.isEnabled = ready
+            vb.btnRemoveAds.alpha = 1f
+        }
     }
 
     private fun updateDailyUi() {
@@ -395,7 +434,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateBoostButtonState() {
         if (isRelaxMode) {
-            vb.btnRewardedBoost.text = "Boost unavailable in Relax mode"
+            vb.btnRewardedBoost.text = "Relax"
             vb.btnRewardedBoost.isEnabled = false
             updateTopUI()
             return
@@ -403,10 +442,10 @@ class MainActivity : AppCompatActivity() {
         val remainingMs = Prefs.getBoostUntilMs(this) - System.currentTimeMillis()
         if (remainingMs > 0) {
             val remainingSec = (remainingMs / 1000L).coerceAtLeast(0L)
-            vb.btnRewardedBoost.text = "Boost x$boostMultiplier (${remainingSec}s) • Extend +3m"
+            vb.btnRewardedBoost.text = "${remainingSec}s"
             vb.btnRewardedBoost.isEnabled = true
         } else {
-            vb.btnRewardedBoost.text = "Watch Ad: x$boostMultiplier Coins (3m)"
+            vb.btnRewardedBoost.text = "Boost"
             vb.btnRewardedBoost.isEnabled = true
         }
         updateTopUI()

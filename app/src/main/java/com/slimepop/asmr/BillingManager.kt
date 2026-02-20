@@ -2,12 +2,14 @@ package com.slimepop.asmr
 
 import android.app.Activity
 import android.content.Context
+import android.os.Build
 import com.android.billingclient.api.*
 import java.lang.ref.WeakReference
 
 class BillingManager(
     private val context: Context,
-    private val onEntitlements: (Entitlements) -> Unit
+    private val onEntitlements: (Entitlements) -> Unit,
+    private val onCatalogUpdated: (() -> Unit)? = null
 ) : PurchasesUpdatedListener {
 
     private var client: BillingClient? = null
@@ -18,6 +20,31 @@ class BillingManager(
         val activityRef: WeakReference<Activity>,
         val productId: String
     )
+
+    fun checkoutBlockingReason(productId: String): String? {
+        if (!isInstalledFromPlayStore()) {
+            return "Install from Google Play internal testing (not USB/ADB) to purchase."
+        }
+        if (!canPurchase(productId)) {
+            return "Google Play catalog is still loading for this item."
+        }
+        return null
+    }
+
+    private fun isInstalledFromPlayStore(): Boolean {
+        val installer = try {
+            val pm = context.packageManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                pm.getInstallSourceInfo(context.packageName).installingPackageName
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getInstallerPackageName(context.packageName)
+            }
+        } catch (_: Exception) {
+            null
+        }
+        return installer == "com.android.vending"
+    }
 
     fun start() {
         client = BillingClient.newBuilder(context)
@@ -63,6 +90,9 @@ class BillingManager(
     }
 
     fun launchPurchase(activity: Activity, productId: String): Boolean {
+        if (!isInstalledFromPlayStore()) {
+            return false
+        }
         val details = detailsById[productId]
         if (details != null) {
             return launchPurchaseFlow(activity, details)
@@ -102,6 +132,7 @@ class BillingManager(
                     detailsById.clear()
                 }
                 list?.forEach { detailsById[it.productId] = it }
+                onCatalogUpdated?.invoke()
                 attemptPendingPurchase()
             }
         }

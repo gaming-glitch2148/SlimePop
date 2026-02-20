@@ -17,7 +17,8 @@ class ShopAdapter(
         val entitlements: Entitlements,
         val equippedSkinId: String,
         val equippedSoundId: String,
-        val priceLookup: (String) -> String?
+        val priceLookup: (String) -> String?,
+        val canPurchase: (String) -> Boolean
     )
 
     class VH(val vb: RowShopItemBinding) : RecyclerView.ViewHolder(vb.root)
@@ -49,9 +50,18 @@ class ShopAdapter(
             ShopCategory.BUNDLE -> "$1.99"
             else -> "$0.99"
         }
+        val requiresPlay = Monetization.requiresPlayPurchase(item.productId)
+        val playReady = !requiresPlay || s.canPurchase(item.productId)
+        val waitingOnPlay = requiresPlay && !playReady
 
         h.vb.tvTitle.text = item.title
-        h.vb.tvSubtitle.text = "${item.subtitle}\n${if (owned) "Owned" else "Price: $price"}"
+        h.vb.tvSubtitle.text = "${item.subtitle}\n${
+            when {
+                owned -> "Owned"
+                waitingOnPlay -> "Connecting to Google Play..."
+                else -> "Price: $price"
+            }
+        }"
         if (item.badge.isNullOrBlank()) {
             h.vb.tvBadge.visibility = View.GONE
         } else {
@@ -59,8 +69,12 @@ class ShopAdapter(
             h.vb.tvBadge.text = item.badge
         }
 
-        h.vb.btnPrimary.text = if (owned) "Owned" else "Buy"
-        h.vb.btnPrimary.isEnabled = !owned
+        h.vb.btnPrimary.text = when {
+            owned -> "Owned"
+            waitingOnPlay -> "..."
+            else -> "Buy"
+        }
+        h.vb.btnPrimary.isEnabled = !owned && !waitingOnPlay
         h.vb.btnPrimary.setOnClickListener { onBuy(item) }
 
         val canEquip = item.category == ShopCategory.SKIN || item.category == ShopCategory.SOUND

@@ -58,14 +58,24 @@ class ShopActivity : AppCompatActivity() {
         entitlements = EntitlementResolver.resolveFromOwnedProducts(owned)
         shopVariant = resolveOrAssignVariant()
 
-        billing = BillingManager(this) { newEntitlements ->
-            runOnUiThread {
-                entitlements = newEntitlements
-                if (::adapter.isInitialized) {
-                    refresh()
+        billing = BillingManager(
+            context = this,
+            onEntitlements = { newEntitlements ->
+                runOnUiThread {
+                    entitlements = newEntitlements
+                    if (::adapter.isInitialized) {
+                        refresh()
+                    }
+                }
+            },
+            onCatalogUpdated = {
+                runOnUiThread {
+                    if (::adapter.isInitialized) {
+                        refresh()
+                    }
                 }
             }
-        }
+        )
         billing.start()
 
         vb.recycler.layoutManager = LinearLayoutManager(this)
@@ -79,13 +89,19 @@ class ShopActivity : AppCompatActivity() {
                     equippedSoundId = equippedSound,
                     priceLookup = { productId ->
                         billing.getFormattedPrice(productId) ?: Monetization.priceLabelFor(productId)
-                    }
+                    },
+                    canPurchase = { productId -> billing.canPurchase(productId) }
                 )
             },
             onBuy = onBuy@{ item ->
                 RevenueTelemetry.trackBuyClick(this, item.productId, shopVariant.name)
                 if (Monetization.requiresPlayPurchase(item.productId)) {
-                    billing.launchPurchase(this, item.productId)
+                    val launched = billing.launchPurchase(this, item.productId)
+                    if (!launched) {
+                        val reason = billing.checkoutBlockingReason(item.productId)
+                            ?: "Checkout is getting ready. Try again in a second."
+                        Toast.makeText(this, reason, Toast.LENGTH_SHORT).show()
+                    }
                     return@onBuy
                 }
                 val coinCost = Monetization.coinPriceFor(item.productId)
@@ -154,7 +170,6 @@ class ShopActivity : AppCompatActivity() {
     private fun setupTabs() {
         vb.tabs.addTab(vb.tabs.newTab().setText("Skins"))
         vb.tabs.addTab(vb.tabs.newTab().setText("Sounds"))
-        vb.tabs.addTab(vb.tabs.newTab().setText("Special"))
 
         vb.tabs.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
             override fun onTabSelected(tab: TabLayout.Tab) {
@@ -176,17 +191,9 @@ class ShopActivity : AppCompatActivity() {
                     Monetization.subtitleForSkin(skin)
                 )
             }
-            1 -> SoundCatalog.sounds.map { sound ->
+            else -> SoundCatalog.sounds.map { sound ->
                 ShopItem(sound.id, ShopCategory.SOUND, sound.name, Monetization.subtitleForSound(sound))
             }
-            else -> listOf(
-                ShopItem(
-                    Catalog.REMOVE_ADS,
-                    ShopCategory.REMOVE_ADS,
-                    "Remove Ads",
-                    "Permanently disable all interstitial and banner ads."
-                )
-            )
         }
 
         val filtered = if (search.isBlank()) all else {
