@@ -16,6 +16,8 @@ object Prefs {
 
     private const val K_DAILY_DATE = "daily_claim_date"
     private const val K_DAILY_STREAK = "daily_streak"
+    private const val K_DAILY_LAST_REWARD = "daily_last_reward"
+    private const val K_DAILY_AD_BONUS_DATE = "daily_ad_bonus_date"
 
     private const val K_BOOST_UNTIL_MS = "boost_until_ms"
     private const val K_POP_SINCE_INT = "pop_since_int"
@@ -28,6 +30,7 @@ object Prefs {
     private const val K_TOTAL_HOLD_MS = "total_hold_ms"
 
     private const val K_REVIEW_LAST_ISO = "review_last_iso"
+    private const val K_SHOP_VARIANT = "shop_variant"
 
     // Quests
     private const val K_QUEST_DATE = "quest_date"
@@ -48,7 +51,7 @@ object Prefs {
     fun getSound(ctx: Context) = sp(ctx).getBoolean(K_SOUND, true)
     fun setSound(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean(K_SOUND, v).apply()
 
-    fun getEquippedSkinId(ctx: Context) = sp(ctx).getString(K_EQUIPPED_SKIN, "skin_001") ?: "skin_001"
+    fun getEquippedSkinId(ctx: Context) = sp(ctx).getString(K_EQUIPPED_SKIN, "skin_ocean") ?: "skin_ocean"
     fun setEquippedSkinId(ctx: Context, v: String) = sp(ctx).edit().putString(K_EQUIPPED_SKIN, v).apply()
 
     fun getEquippedSoundId(ctx: Context) = sp(ctx).getString(K_EQUIPPED_SOUND, "sound_001") ?: "sound_001"
@@ -65,6 +68,12 @@ object Prefs {
 
     fun getDailyStreak(ctx: Context) = sp(ctx).getInt(K_DAILY_STREAK, 0)
     fun setDailyStreak(ctx: Context, v: Int) = sp(ctx).edit().putInt(K_DAILY_STREAK, v).apply()
+
+    fun getDailyLastReward(ctx: Context) = sp(ctx).getInt(K_DAILY_LAST_REWARD, 0)
+    fun setDailyLastReward(ctx: Context, v: Int) = sp(ctx).edit().putInt(K_DAILY_LAST_REWARD, v).apply()
+
+    fun getDailyAdBonusDate(ctx: Context) = sp(ctx).getString(K_DAILY_AD_BONUS_DATE, null)
+    fun setDailyAdBonusDate(ctx: Context, iso: String?) = sp(ctx).edit().putString(K_DAILY_AD_BONUS_DATE, iso).apply()
 
     fun getBoostUntilMs(ctx: Context) = sp(ctx).getLong(K_BOOST_UNTIL_MS, 0L)
     fun setBoostUntilMs(ctx: Context, v: Long) = sp(ctx).edit().putLong(K_BOOST_UNTIL_MS, v).apply()
@@ -98,4 +107,7 @@ object Prefs {
 
     fun getQuestClaimedCsv(ctx: Context) = sp(ctx).getString(K_QUEST_CLAIMED_CSV, "") ?: ""
     fun setQuestClaimedCsv(ctx: Context, v: String) = sp(ctx).edit().putString(K_QUEST_CLAIMED_CSV, v).apply()
+
+    fun getShopVariant(ctx: Context) = sp(ctx).getString(K_SHOP_VARIANT, null)
+    fun setShopVariant(ctx: Context, v: String) = sp(ctx).edit().putString(K_SHOP_VARIANT, v).apply()
 }

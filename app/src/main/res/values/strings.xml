@@ -2,4 +2,7 @@
     <string name="app_name">Slime Pop</string>
     <!-- Google Play Games Services Project Number -->
     <string name="game_services_project_id" translatable="false">974983500700</string>
+    <!-- Replace with your live AdMob unit IDs for release monetization -->
+    <string name="admob_interstitial_unit_id" translatable="false">ca-app-pub-3940256099942544/1033173712</string>
+    <string name="admob_rewarded_unit_id" translatable="false">ca-app-pub-3940256099942544/5224354917</string>
 </resources>

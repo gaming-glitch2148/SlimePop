@@ -1,6 +1,7 @@
 package com.slimepop.asmr
 
 import android.app.Activity
+import android.content.pm.ApplicationInfo
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -20,6 +21,8 @@ class AdManager(
     // TEST IDs
     private val TEST_INTERSTITIAL_ID = "ca-app-pub-3940256099942544/1033173712"
     private val TEST_REWARDED_ID = "ca-app-pub-3940256099942544/5224354917"
+    private val interstitialUnitId: String
+    private val rewardedUnitId: String
 
     private var interstitialAd: InterstitialAd? = null
     private var rewardedAd: RewardedAd? = null
@@ -27,8 +30,22 @@ class AdManager(
     private var lastInterstitialShownMs = Prefs.getLastIntMs(context)
     private var popCountSinceLastInterstitial = Prefs.getPopSinceInt(context)
 
-    private val interstitialEveryNPops = 3
-    private val interstitialCooldownMs = 90_000L
+    private val interstitialEveryNPops = 12
+    private val interstitialCooldownMs = 120_000L
+
+    init {
+        val isDebuggable = (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        interstitialUnitId = if (isDebuggable) {
+            TEST_INTERSTITIAL_ID
+        } else {
+            context.getString(R.string.admob_interstitial_unit_id)
+        }
+        rewardedUnitId = if (isDebuggable) {
+            TEST_REWARDED_ID
+        } else {
+            context.getString(R.string.admob_rewarded_unit_id)
+        }
+    }
 
     var adsEnabled: Boolean = true
         set(value) {
@@ -120,7 +137,7 @@ class AdManager(
     private fun loadInterstitial() {
         if (!adsEnabled || !hasNetwork()) return
         val request = AdRequest.Builder().build()
-        InterstitialAd.load(context, TEST_INTERSTITIAL_ID, request,
+        InterstitialAd.load(context, interstitialUnitId, request,
             object : InterstitialAdLoadCallback() {
                 override fun onAdLoaded(ad: InterstitialAd) {
                     Log.d("AdManager", "Interstitial loaded")
@@ -137,7 +154,7 @@ class AdManager(
     private fun loadRewarded() {
         if (!adsEnabled || !hasNetwork()) return
         val request = AdRequest.Builder().build()
-        RewardedAd.load(context, TEST_REWARDED_ID, request,
+        RewardedAd.load(context, rewardedUnitId, request,
             object : RewardedAdLoadCallback() {
                 override fun onAdLoaded(ad: RewardedAd) {
                     Log.d("AdManager", "Rewarded loaded")

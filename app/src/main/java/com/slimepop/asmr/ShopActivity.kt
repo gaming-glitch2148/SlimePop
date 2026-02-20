@@ -9,6 +9,7 @@ import androidx.core.widget.doAfterTextChanged
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.tabs.TabLayout
 import com.slimepop.asmr.databinding.ActivityShopBinding
+import kotlin.random.Random
 
 class ShopActivity : AppCompatActivity() {
 
@@ -33,6 +34,8 @@ class ShopActivity : AppCompatActivity() {
     private var entitlements = EntitlementResolver.resolveFromOwnedProducts(emptySet())
     private var equippedSkin = "skin_ocean"
     private var equippedSound = "sound_001"
+    private lateinit var shopVariant: ShopMerchandising.Variant
+    private val sessionImpressions = mutableSetOf<String>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -52,6 +55,7 @@ class ShopActivity : AppCompatActivity() {
         val ownedCsv = intent.getStringExtra(EXTRA_OWNED_PRODUCTS_CSV) ?: ""
         val owned = EntitlementResolver.ownedSetFromCsv(ownedCsv)
         entitlements = EntitlementResolver.resolveFromOwnedProducts(owned)
+        shopVariant = resolveOrAssignVariant()
 
         vb.recycler.layoutManager = LinearLayoutManager(this)
 
@@ -62,37 +66,23 @@ class ShopActivity : AppCompatActivity() {
                     entitlements = entitlements,
                     equippedSkinId = equippedSkin,
                     equippedSoundId = equippedSound,
-                    priceLookup = { productId ->
-                        // Dynamically determine price display
-                        val skin = SkinCatalog.skins.find { it.id == productId }
-                        when {
-                            skin == null -> null
-                            skin.isIAP -> "$0.99"
-                            skin.coinPrice > 0 -> "${skin.coinPrice} Coins"
-                            else -> "Free"
-                        }
-                    }
+                    priceLookup = { productId -> Monetization.priceLabelFor(productId) }
                 )
             },
             onBuy = { item ->
-                // Check if it's a coin skin or IAP skin
-                val skin = SkinCatalog.skins.find { it.id == item.productId }
-
-                if (skin != null && !skin.isIAP && skin.coinPrice > 0) {
-                    // HANDLE COIN PURCHASE
-                    if (userCoins >= skin.coinPrice) {
-                        // Success: Notify MainActivity to subtract coins and unlock
+                RevenueTelemetry.trackBuyClick(this, item.productId, shopVariant.name)
+                val coinCost = Monetization.coinPriceFor(item.productId)
+                if (coinCost != null) {
+                    if (coinCost <= 0 || userCoins >= coinCost) {
                         val data = Intent().apply {
                             putExtra(RESULT_BUY_PRODUCT, item.productId)
                         }
                         setResult(RESULT_OK, data)
                         finish()
                     } else {
-                        Toast.makeText(this, "Need ${skin.coinPrice - userCoins} more coins!", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this, "Need ${coinCost - userCoins} more coins!", Toast.LENGTH_SHORT).show()
                     }
                 } else {
-                    // HANDLE $0.99 IAP PURCHASE
-                    // Returning RESULT_BUY_PRODUCT tells MainActivity to start the BillingManager flow
                     val data = Intent().apply {
                         putExtra(RESULT_BUY_PRODUCT, item.productId)
                     }
@@ -101,6 +91,7 @@ class ShopActivity : AppCompatActivity() {
                 }
             },
             onEquip = { item ->
+                RevenueTelemetry.trackEquipClick(this, item.productId, shopVariant.name)
                 when (item.category) {
                     ShopCategory.SKIN -> {
                         equippedSkin = item.productId
@@ -158,11 +149,11 @@ class ShopActivity : AppCompatActivity() {
                     skin.id,
                     ShopCategory.SKIN,
                     skin.name,
-                    if (skin.isIAP) "Premium 3D Texture ($0.99)" else "Gameplay Unlock"
+                    Monetization.subtitleForSkin(skin)
                 )
             }
-            1 -> Catalog.SOUNDS.map { id ->
-                ShopItem(id, ShopCategory.SOUND, ContentNames.soundNameFor(id), "ASMR Soundscape")
+            1 -> SoundCatalog.sounds.map { sound ->
+                ShopItem(sound.id, ShopCategory.SOUND, sound.name, Monetization.subtitleForSound(sound))
             }
             else -> listOf(
                 ShopItem(
@@ -182,6 +173,31 @@ class ShopActivity : AppCompatActivity() {
             }
         }
 
-        adapter.submit(filtered)
+        val merchandised = ShopMerchandising.rankAndBadge(
+            items = filtered,
+            variant = shopVariant,
+            entitlements = entitlements,
+            coinPriceLookup = { productId -> Monetization.coinPriceFor(productId) },
+            requiresPlayPurchase = { productId -> Monetization.requiresPlayPurchase(productId) }
+        )
+        merchandised.forEach { item ->
+            if (sessionImpressions.add(item.productId)) {
+                RevenueTelemetry.trackImpression(this, item.productId, shopVariant.name)
+            }
+        }
+        adapter.submit(merchandised)
+    }
+
+    private fun resolveOrAssignVariant(): ShopMerchandising.Variant {
+        val saved = ShopMerchandising.parseVariant(Prefs.getShopVariant(this))
+        if (saved != null) return saved
+
+        val assigned = if (Random.nextBoolean()) {
+            ShopMerchandising.Variant.PREMIUM_FIRST
+        } else {
+            ShopMerchandising.Variant.VALUE_STACK
+        }
+        Prefs.setShopVariant(this, assigned.name)
+        return assigned
     }
 }

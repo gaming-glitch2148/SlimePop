@@ -45,10 +45,10 @@ object SkinCatalog {
 
     val skins = listOf(
         // BASIC SKINS (Unlocked by Gameplay/Coins)
-        SlimeSkin("skin_ocean", "Tropical Ocean", c("#0077BE"), c("#82EEFD"), isNeon = false, coinPrice = 1000, isIAP = false),
-        SlimeSkin("skin_bubblegum", "Bubblegum", c("#FF69B4"), c("#FFC0CB"), isNeon = false, coinPrice = 2000, isIAP = false),
-        SlimeSkin("skin_mint", "Magic Mint", c("#00FA9A"), c("#F0FFF0"), isNeon = false, coinPrice = 5000, isIAP = false),
-        SlimeSkin("skin_lavender", "Lavender Sky", c("#967BB6"), c("#E6E6FA"), isNeon = false, coinPrice = 10000, isIAP = false),
+        SlimeSkin("skin_ocean", "Tropical Ocean", c("#0077BE"), c("#82EEFD"), isNeon = false, coinPrice = 600, isIAP = false),
+        SlimeSkin("skin_bubblegum", "Bubblegum", c("#FF69B4"), c("#FFC0CB"), isNeon = false, coinPrice = 1800, isIAP = false),
+        SlimeSkin("skin_mint", "Magic Mint", c("#00FA9A"), c("#F0FFF0"), isNeon = false, coinPrice = 4200, isIAP = false),
+        SlimeSkin("skin_lavender", "Lavender Sky", c("#967BB6"), c("#E6E6FA"), isNeon = false, coinPrice = 9000, isIAP = false),
 
         // ORIGINAL PREMIUM SKINS (Your existing set, lightly tuned isNeon)
         SlimeSkin("skin_gold", "Golden Shimmer", c("#D4AF37"), c("#FFFACD"), isNeon = false, coinPrice = 0, isIAP = true),

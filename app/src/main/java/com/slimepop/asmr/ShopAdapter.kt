@@ -1,6 +1,7 @@
 package com.slimepop.asmr
 
 import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
 import com.slimepop.asmr.databinding.RowShopItemBinding
@@ -50,7 +51,13 @@ class ShopAdapter(
         }
 
         h.vb.tvTitle.text = item.title
-        h.vb.tvSubtitle.text = "${item.subtitle}\n${if (owned) "Owned ✅" else "Price: $price"}"
+        h.vb.tvSubtitle.text = "${item.subtitle}\n${if (owned) "Owned" else "Price: $price"}"
+        if (item.badge.isNullOrBlank()) {
+            h.vb.tvBadge.visibility = View.GONE
+        } else {
+            h.vb.tvBadge.visibility = View.VISIBLE
+            h.vb.tvBadge.text = item.badge
+        }
 
         h.vb.btnPrimary.text = if (owned) "Owned" else "Buy"
         h.vb.btnPrimary.isEnabled = !owned

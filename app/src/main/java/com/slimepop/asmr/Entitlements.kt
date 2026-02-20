@@ -15,7 +15,7 @@ object EntitlementResolver {
 
         val ownedContent = mutableSetOf<String>()
 
-        ownedContent.add("skin_001")
+        ownedContent.add("skin_ocean")
         ownedContent.add("sound_001")
 
         owned.filter { it.startsWith("skin_") || it.startsWith("sound_") }

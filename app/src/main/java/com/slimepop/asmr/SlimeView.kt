@@ -15,6 +15,11 @@ class SlimeView @JvmOverloads constructor(
 ) : View(context, attrs) {
 
     var onPop: ((coinsEarned: Int, holdMs: Long) -> Unit)? = null
+    var isRelaxMode: Boolean = false
+        set(value) {
+            field = value
+            invalidate()
+        }
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val bubblePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -24,6 +29,10 @@ class SlimeView @JvmOverloads constructor(
         style = Paint.Style.STROKE
         strokeWidth = 8f
     }
+    private val highlightPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+    }
 
     private var cx = 0f
     private var cy = 0f
@@ -31,15 +40,32 @@ class SlimeView @JvmOverloads constructor(
 
     private var pressed = false
     private var pressStartMs = 0L
-    private var charge = 0f // 0..1
+    private var charge = 0f
+    private var touchX = 0f
+    private var touchY = 0f
+    private var lastTouchX = 0f
+    private var lastTouchY = 0f
+    private var activeTouch = false
+    private var wobbleX = 0f
+    private var wobbleY = 0f
+    private var wobbleVx = 0f
+    private var wobbleVy = 0f
+    private var pokeImpulse = 0f
+
+    // Competitiveness features
+    private var popStreak = 0
+    private var lastPopTime = 0L
+    private var isFrenzy = false
+    private var frenzyEndMs = 0L
 
     private data class Bubble(
-        val relX: Float, 
-        val relY: Float, 
-        val relR: Float, 
-        var popped: Boolean = false, 
+        val relX: Float,
+        val relY: Float,
+        val relR: Float,
+        var popped: Boolean = false,
         var growth: Float = 0f,
-        val rotation: Float = 0f
+        val rotation: Float = 0f,
+        val isGolden: Boolean = false
     )
     private val slimeBubbles = mutableListOf<Bubble>()
     private val maxBubbles = 15
@@ -50,7 +76,7 @@ class SlimeView @JvmOverloads constructor(
     private data class Particle(var x: Float, var y: Float, var vx: Float, var vy: Float, var life: Int, var color: Int = Color.WHITE)
     private val particles = ArrayList<Particle>()
 
-    private var skinIndex: Int = 0 
+    private var currentSkin: SlimeSkin = SkinCatalog.getSkinById("skin_ocean")
     private val random = Random()
     private val slimePath = Path()
     private var lastSpawnTime = 0L
@@ -59,18 +85,13 @@ class SlimeView @JvmOverloads constructor(
     private val bgColor = Color.parseColor("#0B0F14")
     private val glossyOvalRect = RectF()
 
-    fun setSkinIndex(index0: Int) {
-        val newIdx = index0.coerceIn(0, 49)
-        if (skinIndex != newIdx) {
-            skinIndex = newIdx
-            bodyGradient = null // Reset cached gradient
+    fun setSkin(skinId: String) {
+        val newSkin = SkinCatalog.skins.find { it.id == skinId } ?: SkinCatalog.getSkinById("skin_ocean")
+        if (currentSkin.id != newSkin.id) {
+            currentSkin = newSkin
+            bodyGradient = null 
             invalidate()
         }
-    }
-
-    fun setSkin(skinId: String) {
-        val index = skinId.removePrefix("skin_").toIntOrNull()?.minus(1) ?: 0
-        setSkinIndex(index)
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
@@ -79,6 +100,10 @@ class SlimeView @JvmOverloads constructor(
             cy = h / 2f
             baseRadius = min(w, h) * 0.45f
             bodyGradient = null 
+            wobbleX = 0f
+            wobbleY = 0f
+            wobbleVx = 0f
+            wobbleVy = 0f
             generateInitialBubbles()
             invalidate()
         }
@@ -97,7 +122,8 @@ class SlimeView @JvmOverloads constructor(
         val bx = cos(angle) * dist
         val by = sin(angle) * dist
         val br = 0.08f + random.nextFloat() * 0.12f
-        slimeBubbles.add(Bubble(bx, by, br, growth = if (instant) 1f else 0f, rotation = random.nextFloat() * 360f))
+        val isGolden = !isRelaxMode && random.nextFloat() < 0.05f
+        slimeBubbles.add(Bubble(bx, by, br, growth = if (instant) 1f else 0f, rotation = random.nextFloat() * 360f, isGolden = isGolden))
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -106,35 +132,38 @@ class SlimeView @JvmOverloads constructor(
 
         updateAnimations()
 
-        val colors = SkinColors.get(skinIndex)
+        val skin = currentSkin
         val time = SystemClock.elapsedRealtime() / 1000f
 
         val effectiveRadius = if (baseRadius > 0) baseRadius else min(width, height) * 0.45f
-        if (effectiveRadius <= 0) return 
+        if (effectiveRadius <= 0) return
 
         val drawCx = if (cx > 0) cx else width / 2f
         val drawCy = if (cy > 0) cy else height / 2f
 
         createIrregularPath(drawCx, drawCy, effectiveRadius, time)
 
-        // Draw shadow
-        paint.shader = null
-        paint.color = Color.BLACK
-        paint.alpha = 80
-        canvas.save()
-        canvas.translate(0f, effectiveRadius * 0.1f)
-        canvas.scale(1.05f, 1.02f, drawCx, drawCy)
-        canvas.drawPath(slimePath, paint)
-        canvas.restore()
+        // Frenzy Glow
+        if (isFrenzy) {
+            paint.shader = null
+            paint.color = Color.YELLOW
+            paint.alpha = (30 + 20 * sin(time * 10f)).toInt().coerceIn(0, 255)
+            canvas.save()
+            canvas.scale(1.15f, 1.15f, drawCx, drawCy)
+            canvas.drawPath(slimePath, paint)
+            canvas.restore()
+        }
 
-        // Body gradient
+        // Body
         if (bodyGradient == null) {
+            val bright = SkinCatalog.lighten(skin.highlightColor, if (skin.isNeon) 0.35f else 0.18f)
+            val deep = mixColor(skin.baseColor, Color.BLACK, if (skin.isNeon) 0.30f else 0.20f)
             bodyGradient = RadialGradient(
                 drawCx - effectiveRadius * 0.2f,
-                drawCy - effectiveRadius * 0.2f,
-                effectiveRadius * 1.5f,
-                colors.hi,
-                colors.base,
+                drawCy - effectiveRadius * 0.28f,
+                effectiveRadius * 1.45f,
+                intArrayOf(bright, skin.highlightColor, skin.baseColor, deep),
+                floatArrayOf(0f, 0.34f, 0.72f, 1f),
                 Shader.TileMode.CLAMP
             )
         }
@@ -143,216 +172,302 @@ class SlimeView @JvmOverloads constructor(
         canvas.drawPath(slimePath, paint)
         paint.shader = null
 
-        // Draw bubbles inside slime
+        if (skin.isNeon) {
+            paint.color = skin.highlightColor
+            paint.alpha = (40 + 25 * sin(time * 3f)).toInt().coerceIn(0, 255)
+            canvas.save()
+            canvas.scale(1.05f, 1.05f, drawCx, drawCy)
+            canvas.drawPath(slimePath, paint)
+            canvas.restore()
+        }
+
+        paint.shader = LinearGradient(
+            drawCx, drawCy - effectiveRadius * 0.4f,
+            drawCx, drawCy + effectiveRadius,
+            Color.argb(0, 0, 0, 0),
+            Color.argb(72, 0, 0, 0),
+            Shader.TileMode.CLAMP
+        )
+        canvas.drawPath(slimePath, paint)
+        paint.shader = null
+
+        canvas.save()
+        canvas.clipPath(slimePath)
+        val glossX = cos(time * 0.8f) * effectiveRadius * 0.04f + wobbleX * 0.15f
+        val glossY = sin(time * 0.65f) * effectiveRadius * 0.03f + wobbleY * 0.1f
+        glossyOvalRect.set(
+            drawCx - effectiveRadius * 0.55f + glossX,
+            drawCy - effectiveRadius * 0.70f + glossY,
+            drawCx + effectiveRadius * 0.15f + glossX,
+            drawCy - effectiveRadius * 0.08f + glossY
+        )
+        highlightPaint.shader = RadialGradient(
+            glossyOvalRect.centerX(),
+            glossyOvalRect.centerY(),
+            glossyOvalRect.width(),
+            Color.argb(190, 255, 255, 255),
+            Color.argb(0, 255, 255, 255),
+            Shader.TileMode.CLAMP
+        )
+        canvas.drawOval(glossyOvalRect, highlightPaint)
+        highlightPaint.shader = null
+        canvas.restore()
+
+        rimPaint.strokeWidth = (effectiveRadius * 0.015f).coerceAtLeast(2.5f)
+        rimPaint.color = mixColor(skin.highlightColor, Color.WHITE, 0.18f)
+        rimPaint.alpha = 130
+        canvas.drawPath(slimePath, rimPaint)
+
+        // Bubbles
         for (b in slimeBubbles) {
             if (b.popped || b.growth <= 0f) continue
-            
-            val bx = drawCx + b.relX * effectiveRadius * (1f + 0.1f * sin(time + b.relX))
-            val by = drawCy + b.relY * effectiveRadius * (1f + 0.1f * cos(time + b.relY))
+            val bx = drawCx + b.relX * effectiveRadius
+            val by = drawCy + b.relY * effectiveRadius
             val br = b.relR * effectiveRadius * b.growth
-            
-            bubblePaint.color = Color.WHITE
-            bubblePaint.alpha = (40 * b.growth).toInt()
+
+            bubblePaint.color = if (b.isGolden) Color.YELLOW else Color.WHITE
+            bubblePaint.alpha = (if (b.isGolden) 150 + (60 * b.growth).toInt() else (25 + 90 * b.growth).toInt()).coerceIn(0, 255)
             canvas.drawCircle(bx, by, br, bubblePaint)
-            
-            bubblePaint.alpha = (80 * b.growth).toInt()
-            canvas.drawCircle(bx - br * 0.3f, by - br * 0.3f, br * 0.3f, bubblePaint)
+
+            bubblePaint.color = Color.WHITE
+            bubblePaint.alpha = (90 * b.growth).toInt().coerceIn(0, 255)
+            canvas.drawCircle(bx - br * 0.25f, by - br * 0.35f, br * 0.33f, bubblePaint)
         }
 
-        // Glossy highlight
-        paint.color = Color.WHITE
-        paint.alpha = (35 + 40 * (1f - charge)).toInt()
-        glossyOvalRect.set(
-            drawCx - effectiveRadius * 0.6f, 
-            drawCy - effectiveRadius * 0.7f, 
-            drawCx - effectiveRadius * 0.1f, 
-            drawCy - effectiveRadius * 0.2f
-        )
-        canvas.drawOval(glossyOvalRect, paint)
-
-        // Particles
+        // Particles & Ripples
         for (p in particles) {
             paint.color = p.color
-            paint.alpha = (p.life * 8).coerceIn(0, 255)
+            paint.alpha = (p.life * 10).coerceIn(0, 255)
             canvas.drawCircle(p.x, p.y, 6f, paint)
         }
-
-        // Ripples
         for (rp in ripples) {
-            ripplePaint.color = colors.hi
+            ripplePaint.color = skin.highlightColor
             ripplePaint.alpha = rp.a
             canvas.drawCircle(rp.x, rp.y, rp.r, ripplePaint)
         }
 
-        // Instruction
+        // HUD Text
         paint.color = Color.WHITE
-        paint.alpha = 140
-        paint.textSize = 42f
+        paint.alpha = 180
+        paint.textSize = 48f
         paint.textAlign = Paint.Align.CENTER
-        canvas.drawText(if (pressed) "Release to Pop" else "Press & Hold", drawCx, height * 0.12f, paint)
+        if (isRelaxMode) {
+            canvas.drawText("RELAX MODE", drawCx, height * 0.12f, paint)
+        } else if (isFrenzy) {
+            paint.color = Color.YELLOW
+            canvas.drawText("FRENZY! 2X COINS", drawCx, height * 0.12f, paint)
+        }
 
         postInvalidateOnAnimation()
     }
 
     private fun createIrregularPath(centerX: Float, centerY: Float, radius: Float, time: Float) {
         slimePath.reset()
-        val segments = 12
+        val segments = 48
         val angleStep = (2 * PI / segments).toFloat()
-        
-        val squishX = 1f + 0.05f * charge
-        val squishY = 1f - 0.10f * charge
+        val points = ArrayList<PointF>(segments)
+        val wobbleStrength = (hypot(wobbleX, wobbleY) / (radius * 0.35f)).coerceIn(0f, 1.5f)
+        val wobbleAngle = atan2(wobbleY, wobbleX)
 
         for (i in 0 until segments) {
             val angle = i * angleStep
-            val wave = 0.05f * sin(time * 2f + i * 1.5f) + 0.03f * cos(time * 1.3f + i * 0.8f)
-            val r = radius * (1f + wave) * (1f + 0.2f * charge)
-            
-            val x = centerX + cos(angle) * r * squishX
-            val y = centerY + sin(angle) * r * squishY
-            
-            if (i == 0) {
-                slimePath.moveTo(x, y)
+            val wave = 0.028f * sin(time * 2.2f + i * 0.9f) + 0.014f * cos(time * 3.3f + i * 1.7f)
+            val directionalStretch = if (wobbleStrength > 0f) 0.08f * cos(angle - wobbleAngle) * wobbleStrength else 0f
+
+            val touchInfluence = if (activeTouch || pressed) {
+                val nx = ((touchX - centerX) / radius).coerceIn(-1f, 1f)
+                val ny = ((touchY - centerY) / radius).coerceIn(-1f, 1f)
+                0.06f * (cos(angle) * nx + sin(angle) * ny) * (0.4f + charge)
             } else {
-                val prevAngle = (i - 1) * angleStep
-                val cp1x = centerX + cos(prevAngle + angleStep * 0.5f) * radius * squishX * 1.1f
-                val cp1y = centerY + sin(prevAngle + angleStep * 0.5f) * radius * squishY * 1.1f
-                
-                slimePath.quadTo(cp1x, cp1y, x, y)
+                0f
             }
+
+            val r = radius * (1f + wave + directionalStretch + touchInfluence + 0.09f * charge + 0.04f * pokeImpulse)
+            val x = centerX + cos(angle) * r + wobbleX * 0.1f
+            val y = centerY + sin(angle) * r + wobbleY * 0.1f
+            points.add(PointF(x, y))
         }
-        slimePath.close()
+
+        if (points.isNotEmpty()) {
+            val firstMid = midpoint(points[0], points[1 % points.size])
+            slimePath.moveTo(firstMid.x, firstMid.y)
+            for (i in points.indices) {
+                val current = points[(i + 1) % points.size]
+                val next = points[(i + 2) % points.size]
+                val mid = midpoint(current, next)
+                slimePath.quadTo(current.x, current.y, mid.x, mid.y)
+            }
+            slimePath.close()
+        }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        val currentCx = if (cx > 0) cx else width / 2f
-        val currentCy = if (cy > 0) cy else height / 2f
-
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 pressed = true
                 pressStartMs = SystemClock.elapsedRealtime()
-                performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                touchX = event.x
+                touchY = event.y
+                lastTouchX = event.x
+                lastTouchY = event.y
+                activeTouch = true
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
-                val dx = (event.x - currentCx) * 0.04f
-                val dy = (event.y - currentCy) * 0.04f
-                cx = (currentCx + dx).coerceIn(width * 0.05f, width * 0.95f)
-                cy = (currentCy + dy).coerceIn(height * 0.05f, height * 0.95f)
+                touchX = event.x
+                touchY = event.y
+                activeTouch = true
+
+                val dx = event.x - lastTouchX
+                val dy = event.y - lastTouchY
+                wobbleVx += dx * 0.11f
+                wobbleVy += dy * 0.11f
+                pokeImpulse = (pokeImpulse + hypot(dx, dy) / 450f).coerceIn(0f, 1f)
+
+                lastTouchX = event.x
+                lastTouchY = event.y
                 return true
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+            MotionEvent.ACTION_UP -> {
                 if (pressed) {
-                    val heldMs = (SystemClock.elapsedRealtime() - pressStartMs).coerceAtLeast(0L)
-                    val c = (heldMs / 900f).coerceIn(0f, 1f)
-                    val effectiveRadius = if (baseRadius > 0) baseRadius else min(width, height) * 0.45f
+                    val heldMs = SystemClock.elapsedRealtime() - pressStartMs
+                    val radius = if (baseRadius > 0) baseRadius else min(width, height) * 0.45f
+                    val bubble = findNearestBubble(event.x, event.y, radius)
 
-                    val didPop = popNearestBubble(event.x, event.y, effectiveRadius)
-
-                    if (didPop) {
-                        addRipple(event.x, event.y, c, effectiveRadius)
-                        addParticles(event.x, event.y, c, Color.WHITE)
-
-                        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-
-                        val coins = (1 + (4 * c)).roundToInt()
-                        onPop?.invoke(coins, heldMs)
-                    } else {
-                        addRipple(event.x, event.y, 0.1f, effectiveRadius * 0.5f)
+                    if (bubble != null) {
+                        bubble.popped = true
+                        handlePopLogic(event.x, event.y, bubble, heldMs)
                     }
                 }
+                activeTouch = false
+                pressed = false
+                charge = 0f
+                pokeImpulse *= 0.8f
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                activeTouch = false
                 pressed = false
                 charge = 0f
                 return true
             }
         }
-        return super.onTouchEvent(event)
+        return true
     }
 
-    private fun popNearestBubble(tx: Float, ty: Float, r: Float): Boolean {
-        var nearest: Bubble? = null
-        var minDist = Float.MAX_VALUE
-        val time = SystemClock.elapsedRealtime() / 1000f
-
+    private fun findNearestBubble(tx: Float, ty: Float, r: Float): Bubble? {
         val currentCx = if (cx > 0) cx else width / 2f
         val currentCy = if (cy > 0) cy else height / 2f
-
         for (b in slimeBubbles) {
             if (b.popped || b.growth < 0.5f) continue
-            val bx = currentCx + b.relX * r * (1f + 0.1f * sin(time + b.relX))
-            val by = currentCy + b.relY * r * (1f + 0.1f * cos(time + b.relY))
+            val bx = currentCx + b.relX * r
+            val by = currentCy + b.relY * r
             val dist = sqrt((tx - bx).pow(2) + (ty - by).pow(2))
-            
-            val bubbleRadius = b.relR * r * b.growth
-            if (dist < minDist && dist < bubbleRadius * 2.0f) { 
-                minDist = dist
-                nearest = b
+            if (dist < b.relR * r * 2.5f) return b
+        }
+        return null
+    }
+
+    private fun handlePopLogic(x: Float, y: Float, bubble: Bubble, heldMs: Long) {
+        val now = SystemClock.elapsedRealtime()
+
+        // Streak Logic
+        if (now - lastPopTime < 1500) {
+            popStreak++
+            if (popStreak >= 5) {
+                isFrenzy = true
+                frenzyEndMs = now + 10000
             }
+        } else {
+            popStreak = 1
         }
-        
-        nearest?.let {
-            it.popped = true
-            val bx = currentCx + it.relX * r * (1f + 0.1f * sin(time + it.relX))
-            val by = currentCy + it.relY * r * (1f + 0.1f * cos(time + it.relY))
-            addParticles(bx, by, 0.5f, Color.WHITE, countFactor = 1.5f)
-            slimeBubbles.removeAll { it.popped }
-            return true
+        lastPopTime = now
+
+        // Sound & Particles
+        performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+        addParticles(x, y, if (bubble.isGolden) Color.YELLOW else Color.WHITE)
+        ripples.add(Ripple(x, y, 20f, 200))
+        wobbleVx += (x - cx) * 0.02f
+        wobbleVy += (y - cy) * 0.02f
+        pokeImpulse = pokeImpulse.coerceAtLeast(0.45f)
+
+        // Coin Logic
+        if (isRelaxMode) {
+            onPop?.invoke(0, heldMs)
+        } else {
+            var coins = if (bubble.isGolden) 25 else 1
+            if (isFrenzy) coins *= 2
+            onPop?.invoke(coins, heldMs)
         }
-        return false
+
+        slimeBubbles.removeAll { it.popped }
     }
 
-    private fun addRipple(x: Float, y: Float, c: Float, r: Float) {
-        val startR = r * (0.2f + 0.2f * c)
-        ripples.add(Ripple(x, y, startR, 200))
-    }
-
-    private fun addParticles(x: Float, y: Float, c: Float, color: Int, countFactor: Float = 1f) {
-        val count = ((10 + 20 * c) * countFactor).roundToInt()
-        for (i in 0 until count) {
-            val ang = (i.toFloat() / count) * (2f * Math.PI.toFloat()) + (random.nextFloat() - 0.5f)
-            val spd = 2f + 8f * c * random.nextFloat()
-            val vx = cos(ang) * spd
-            val vy = sin(ang) * spd
-            particles.add(Particle(x, y, vx, vy, 20 + random.nextInt(15), color))
+    private fun addParticles(x: Float, y: Float, color: Int) {
+        for (i in 0 until 15) {
+            val ang = random.nextFloat() * 2 * PI.toFloat()
+            val spd = 2f + 5f * random.nextFloat()
+            particles.add(Particle(x, y, cos(ang) * spd, sin(ang) * spd, 20 + random.nextInt(10), color))
         }
     }
 
     private fun updateAnimations() {
         val now = SystemClock.elapsedRealtime()
-        
-        if (pressed) {
-            val heldMs = (now - pressStartMs).coerceAtLeast(0L)
-            charge = (heldMs / 900f).coerceIn(0f, 1f)
+        if (now > frenzyEndMs) isFrenzy = false
+        if (pressed) charge = ((now - pressStartMs) / 1000f).coerceIn(0f, 1f)
+
+        val currentCx = if (cx > 0) cx else width / 2f
+        val currentCy = if (cy > 0) cy else height / 2f
+        val currentR = if (baseRadius > 0) baseRadius else min(width, height) * 0.45f
+        if (currentR > 0f) {
+            val targetX = if (activeTouch) ((touchX - currentCx).coerceIn(-currentR, currentR)) * 0.20f else 0f
+            val targetY = if (activeTouch) ((touchY - currentCy).coerceIn(-currentR, currentR)) * 0.20f else 0f
+
+            wobbleVx += (targetX - wobbleX) * 0.06f
+            wobbleVy += (targetY - wobbleY) * 0.06f
+            wobbleVx += -wobbleX * 0.025f
+            wobbleVy += -wobbleY * 0.025f
+            wobbleVx *= 0.87f
+            wobbleVy *= 0.87f
+            wobbleX += wobbleVx
+            wobbleY += wobbleVy
         }
 
-        for (b in slimeBubbles) {
-            if (!b.popped && b.growth < 1f) {
-                b.growth += 0.01f
-            }
-        }
+        if (!pressed) pokeImpulse *= 0.94f
 
-        if (slimeBubbles.size < maxBubbles && now - lastSpawnTime > 1500) {
-            spawnNewBubble(false)
+        for (b in slimeBubbles) if (!b.popped && b.growth < 1f) b.growth += 0.02f
+        if (slimeBubbles.size < maxBubbles && now - lastSpawnTime > (if (isFrenzy) 400 else 1000)) {
+            spawnNewBubble()
             lastSpawnTime = now
         }
 
         val rit = ripples.iterator()
         while (rit.hasNext()) {
             val rp = rit.next()
-            rp.r += 12f
-            rp.a -= 8
+            rp.r += 9f + pokeImpulse * 2f
+            rp.a -= 10
             if (rp.a <= 0) rit.remove()
         }
 
         val pit = particles.iterator()
         while (pit.hasNext()) {
             val p = pit.next()
+            p.vx *= 0.98f
+            p.vy = p.vy * 0.98f + 0.12f
             p.x += p.vx
             p.y += p.vy
-            p.vx *= 0.95f
-            p.vy *= 0.95f
-            p.life -= 1
+            p.life--
             if (p.life <= 0) pit.remove()
         }
+    }
+
+    private fun midpoint(a: PointF, b: PointF): PointF = PointF((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f)
+
+    private fun mixColor(from: Int, to: Int, t: Float): Int {
+        val ratio = t.coerceIn(0f, 1f)
+        val r = (Color.red(from) + (Color.red(to) - Color.red(from)) * ratio).toInt().coerceIn(0, 255)
+        val g = (Color.green(from) + (Color.green(to) - Color.green(from)) * ratio).toInt().coerceIn(0, 255)
+        val b = (Color.blue(from) + (Color.blue(to) - Color.blue(from)) * ratio).toInt().coerceIn(0, 255)
+        return Color.rgb(r, g, b)
     }
 }

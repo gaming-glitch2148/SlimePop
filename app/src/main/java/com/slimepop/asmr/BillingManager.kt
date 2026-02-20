@@ -21,7 +21,7 @@ class BillingManager(
         client?.startConnection(object : BillingClientStateListener {
             override fun onBillingSetupFinished(result: BillingResult) {
                 if (result.responseCode == BillingClient.BillingResponseCode.OK) {
-                    queryProductDetails(Catalog.ALL)
+                    queryProductDetails(Monetization.billingProductIds())
                     restorePurchases()
                 }
             }
@@ -62,7 +62,7 @@ class BillingManager(
             .build()
 
         c.queryPurchasesAsync(params) { _, purchases ->
-            handlePurchases(purchases)
+            handlePurchases(purchases, isRestore = true)
         }
     }
 
@@ -88,18 +88,30 @@ class BillingManager(
 
     override fun onPurchasesUpdated(result: BillingResult, purchases: MutableList<Purchase>?) {
         if (result.responseCode == BillingClient.BillingResponseCode.OK && purchases != null) {
-            handlePurchases(purchases)
+            handlePurchases(purchases, isRestore = false)
         }
     }
 
-    private fun handlePurchases(purchases: List<Purchase>) {
+    private fun handlePurchases(purchases: List<Purchase>, isRestore: Boolean) {
+        val previousOwned = EntitlementResolver.ownedSetFromCsv(Prefs.getOwnedIapCsv(context))
         val owned = purchases
             .filter { it.purchaseState == Purchase.PurchaseState.PURCHASED }
             .flatMap { it.products }
             .toSet()
+        val newlyOwned = owned - previousOwned
 
         Prefs.setOwnedIapCsv(context, owned.sorted().joinToString(","))
         Prefs.setAdsRemoved(context, owned.contains(Catalog.REMOVE_ADS))
+
+        if (!isRestore) {
+            newlyOwned.forEach { productId ->
+                RevenueTelemetry.trackPurchaseConfirmed(
+                    context,
+                    productId,
+                    RevenueTelemetry.PurchaseSource.PLAY_BILLING
+                )
+            }
+        }
 
         val ent = EntitlementResolver.resolveFromOwnedProducts(owned)
         onEntitlements(ent)

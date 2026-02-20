@@ -6,5 +6,6 @@ data class ShopItem(
     val productId: String,
     val category: ShopCategory,
     val title: String,
-    val subtitle: String
+    val subtitle: String,
+    val badge: String? = null
 )
