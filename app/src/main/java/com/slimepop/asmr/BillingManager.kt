@@ -3,6 +3,7 @@ package com.slimepop.asmr
 import android.app.Activity
 import android.content.Context
 import com.android.billingclient.api.*
+import java.lang.ref.WeakReference
 
 class BillingManager(
     private val context: Context,
@@ -11,6 +12,12 @@ class BillingManager(
 
     private var client: BillingClient? = null
     private val detailsById = mutableMapOf<String, ProductDetails>()
+    private var pendingPurchase: PendingPurchase? = null
+
+    private data class PendingPurchase(
+        val activityRef: WeakReference<Activity>,
+        val productId: String
+    )
 
     fun start() {
         client = BillingClient.newBuilder(context)
@@ -21,7 +28,7 @@ class BillingManager(
         client?.startConnection(object : BillingClientStateListener {
             override fun onBillingSetupFinished(result: BillingResult) {
                 if (result.responseCode == BillingClient.BillingResponseCode.OK) {
-                    queryProductDetails(Monetization.billingProductIds())
+                    queryProductDetails(Monetization.billingProductIds(), replaceCache = true)
                     restorePurchases()
                 }
             }
@@ -40,9 +47,8 @@ class BillingManager(
 
     fun canPurchase(productId: String) = detailsById.containsKey(productId)
 
-    fun launchPurchase(activity: Activity, productId: String) {
-        val c = client ?: return
-        val details = detailsById[productId] ?: return
+    private fun launchPurchaseFlow(activity: Activity, details: ProductDetails): Boolean {
+        val c = client ?: return false
 
         val productParams = BillingFlowParams.ProductDetailsParams.newBuilder()
             .setProductDetails(details)
@@ -52,7 +58,19 @@ class BillingManager(
             .setProductDetailsParamsList(listOf(productParams))
             .build()
 
-        c.launchBillingFlow(activity, flow)
+        val result = c.launchBillingFlow(activity, flow)
+        return result.responseCode == BillingClient.BillingResponseCode.OK
+    }
+
+    fun launchPurchase(activity: Activity, productId: String): Boolean {
+        val details = detailsById[productId]
+        if (details != null) {
+            return launchPurchaseFlow(activity, details)
+        }
+
+        pendingPurchase = PendingPurchase(WeakReference(activity), productId)
+        queryProductDetails(listOf(productId), replaceCache = false)
+        return false
     }
 
     fun restorePurchases() {
@@ -66,7 +84,7 @@ class BillingManager(
         }
     }
 
-    private fun queryProductDetails(ids: List<String>) {
+    private fun queryProductDetails(ids: List<String>, replaceCache: Boolean) {
         val products = ids.map { id ->
             QueryProductDetailsParams.Product.newBuilder()
                 .setProductId(id)
@@ -80,9 +98,25 @@ class BillingManager(
 
         client?.queryProductDetailsAsync(params) { result, list ->
             if (result.responseCode == BillingClient.BillingResponseCode.OK) {
-                detailsById.clear()
+                if (replaceCache) {
+                    detailsById.clear()
+                }
                 list?.forEach { detailsById[it.productId] = it }
+                attemptPendingPurchase()
             }
+        }
+    }
+
+    private fun attemptPendingPurchase() {
+        val pending = pendingPurchase ?: return
+        val details = detailsById[pending.productId] ?: return
+        val activity = pending.activityRef.get() ?: run {
+            pendingPurchase = null
+            return
+        }
+        val launched = launchPurchaseFlow(activity, details)
+        if (launched) {
+            pendingPurchase = null
         }
     }
 

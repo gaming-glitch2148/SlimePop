@@ -63,7 +63,9 @@ class MainActivity : AppCompatActivity() {
 
             data.getStringExtra(ShopActivity.RESULT_BUY_PRODUCT)?.let { productId ->
                 if (Monetization.requiresPlayPurchase(productId)) {
-                    billing.launchPurchase(this, productId)
+                    refreshEntitlements()
+                    adManager.adsEnabled = !entitlements.adsRemoved
+                    updateTopUI()
                     return@let
                 }
 
@@ -429,6 +431,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        refreshEntitlements()
+        adManager.adsEnabled = !entitlements.adsRemoved
+        updateTopUI()
         audio.resumeAll()
         updateDailyUi()
         startBoostTicker()

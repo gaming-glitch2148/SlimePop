@@ -26,6 +26,7 @@ class ShopActivity : AppCompatActivity() {
 
     private lateinit var vb: ActivityShopBinding
     private lateinit var adapter: ShopAdapter
+    private lateinit var billing: BillingManager
 
     private var activeTab = 0
     private var search = ""
@@ -57,6 +58,16 @@ class ShopActivity : AppCompatActivity() {
         entitlements = EntitlementResolver.resolveFromOwnedProducts(owned)
         shopVariant = resolveOrAssignVariant()
 
+        billing = BillingManager(this) { newEntitlements ->
+            runOnUiThread {
+                entitlements = newEntitlements
+                if (::adapter.isInitialized) {
+                    refresh()
+                }
+            }
+        }
+        billing.start()
+
         vb.recycler.layoutManager = LinearLayoutManager(this)
 
         adapter = ShopAdapter(
@@ -66,11 +77,17 @@ class ShopActivity : AppCompatActivity() {
                     entitlements = entitlements,
                     equippedSkinId = equippedSkin,
                     equippedSoundId = equippedSound,
-                    priceLookup = { productId -> Monetization.priceLabelFor(productId) }
+                    priceLookup = { productId ->
+                        billing.getFormattedPrice(productId) ?: Monetization.priceLabelFor(productId)
+                    }
                 )
             },
-            onBuy = { item ->
+            onBuy = onBuy@{ item ->
                 RevenueTelemetry.trackBuyClick(this, item.productId, shopVariant.name)
+                if (Monetization.requiresPlayPurchase(item.productId)) {
+                    billing.launchPurchase(this, item.productId)
+                    return@onBuy
+                }
                 val coinCost = Monetization.coinPriceFor(item.productId)
                 if (coinCost != null) {
                     if (coinCost <= 0 || userCoins >= coinCost) {
@@ -125,6 +142,13 @@ class ShopActivity : AppCompatActivity() {
             return true
         }
         return super.onOptionsItemSelected(item)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        if (::billing.isInitialized) {
+            billing.end()
+        }
     }
 
     private fun setupTabs() {
