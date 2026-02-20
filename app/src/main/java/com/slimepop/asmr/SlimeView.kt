@@ -219,17 +219,19 @@ class SlimeView @JvmOverloads constructor(
         canvas.drawPath(slimePath, rimPaint)
 
         // Bubbles
+        val bubbleBaseColor = mixColor(skin.baseColor, skin.highlightColor, 0.58f)
+        val bubbleSpecColor = SkinCatalog.lighten(skin.highlightColor, if (skin.isNeon) 0.55f else 0.38f)
         for (b in slimeBubbles) {
             if (b.popped || b.growth <= 0f) continue
             val bx = drawCx + b.relX * effectiveRadius
             val by = drawCy + b.relY * effectiveRadius
             val br = b.relR * effectiveRadius * b.growth
 
-            bubblePaint.color = if (b.isGolden) Color.YELLOW else Color.WHITE
+            bubblePaint.color = if (b.isGolden) Color.YELLOW else bubbleBaseColor
             bubblePaint.alpha = (if (b.isGolden) 150 + (60 * b.growth).toInt() else (25 + 90 * b.growth).toInt()).coerceIn(0, 255)
             canvas.drawCircle(bx, by, br, bubblePaint)
 
-            bubblePaint.color = Color.WHITE
+            bubblePaint.color = if (b.isGolden) Color.WHITE else bubbleSpecColor
             bubblePaint.alpha = (90 * b.growth).toInt().coerceIn(0, 255)
             canvas.drawCircle(bx - br * 0.25f, by - br * 0.35f, br * 0.33f, bubblePaint)
         }

@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Main slime blob -->
+    <item
+        android:gravity="center"
+        android:width="78dp"
+        android:height="62dp">
+        <shape android:shape="oval">
+            <solid android:color="#86F2A9" />
+        </shape>
+    </item>
+
+    <!-- Drips -->
+    <item
+        android:gravity="center_horizontal|bottom"
+        android:bottom="20dp"
+        android:left="22dp"
+        android:right="50dp"
+        android:height="22dp">
+        <shape android:shape="oval">
+            <solid android:color="#86F2A9" />
+        </shape>
+    </item>
+
+    <item
+        android:gravity="center_horizontal|bottom"
+        android:bottom="16dp"
+        android:left="45dp"
+        android:right="26dp"
+        android:height="28dp">
+        <shape android:shape="oval">
+            <solid android:color="#86F2A9" />
+        </shape>
+    </item>
+
+    <item
+        android:gravity="center_horizontal|bottom"
+        android:bottom="20dp"
+        android:left="58dp"
+        android:right="14dp"
+        android:height="20dp">
+        <shape android:shape="oval">
+            <solid android:color="#86F2A9" />
+        </shape>
+    </item>
+
+    <!-- Highlight -->
+    <item
+        android:gravity="top|center_horizontal"
+        android:top="28dp"
+        android:left="26dp"
+        android:right="52dp"
+        android:height="16dp">
+        <shape android:shape="oval">
+            <solid android:color="#66FFFFFF" />
+        </shape>
+    </item>
+
+    <!-- Eyes -->
+    <item
+        android:gravity="center_horizontal|center_vertical"
+        android:left="36dp"
+        android:right="62dp"
+        android:top="48dp"
+        android:height="6dp">
+        <shape android:shape="oval">
+            <solid android:color="#1E7A4A" />
+        </shape>
+    </item>
+
+    <item
+        android:gravity="center_horizontal|center_vertical"
+        android:left="62dp"
+        android:right="36dp"
+        android:top="48dp"
+        android:height="6dp">
+        <shape android:shape="oval">
+            <solid android:color="#1E7A4A" />
+        </shape>
+    </item>
+</layer-list>

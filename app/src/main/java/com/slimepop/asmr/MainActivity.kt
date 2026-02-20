@@ -11,6 +11,7 @@ import androidx.appcompat.app.AppCompatActivity
 import com.slimepop.asmr.audio.SlimeAudioManager
 import com.slimepop.asmr.databinding.ActivityMainBinding
 import java.time.LocalDate
+import kotlin.random.Random
 
 class MainActivity : AppCompatActivity() {
 
@@ -25,6 +26,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var adManager: AdManager
     private var entitlements = EntitlementResolver.resolveFromOwnedProducts(emptySet())
     private var boostTicker: Runnable? = null
+    private val bubblePopResIds = intArrayOf(
+        R.raw.bubble_pop_01,
+        R.raw.bubble_pop_02,
+        R.raw.bubble_pop_03,
+        R.raw.bubble_pop_04,
+        R.raw.bubble_pop_05,
+        R.raw.bubble_pop_06
+    )
+    private val sfxRandom = Random(System.currentTimeMillis())
 
     private val boostMultiplier = 3
     private val boostDurationMs = 3 * 60 * 1000L
@@ -113,15 +123,12 @@ class MainActivity : AppCompatActivity() {
         updateDailyUi()
         updateBoostButtonState()
 
-        audio.preload(resources.getIdentifier("pop", "raw", packageName))
+        bubblePopResIds.forEach { audio.preload(it) }
         vb.root.postDelayed({
             updateSound()
         }, 500)
 
         vb.btnShop.setOnClickListener {
-            if (!entitlements.adsRemoved) {
-                adManager.showInterstitialIfReady()
-            }
             val intent = Intent(this, ShopActivity::class.java).apply {
                 putExtra(ShopActivity.EXTRA_EQUIPPED_SKIN, equippedSkinId)
                 putExtra(ShopActivity.EXTRA_EQUIPPED_SOUND, equippedSoundId)
@@ -185,8 +192,7 @@ class MainActivity : AppCompatActivity() {
             Prefs.setTotalPops(this, totalPops)
             Prefs.setTotalHoldMs(this, Prefs.getTotalHoldMs(this) + holdMs)
 
-            val popRes = resources.getIdentifier("pop", "raw", packageName)
-            audio.playSfx(popRes)
+            playBubblePopSfx(holdMs)
         }
     }
 
@@ -251,6 +257,27 @@ class MainActivity : AppCompatActivity() {
         val sound = SoundCatalog.sounds.find { it.id == productId }
         if (sound != null) return sound.name
         return productId
+    }
+
+    private fun playBubblePopSfx(holdMs: Long) {
+        if (!Prefs.getSound(this) || bubblePopResIds.isEmpty()) return
+
+        val intensity = (holdMs / 220f).coerceIn(0f, 1f)
+        val popResId = bubblePopResIds[sfxRandom.nextInt(bubblePopResIds.size)]
+        val baseRate = (0.96f + intensity * 0.12f + sfxRandom.nextFloat() * 0.06f).coerceIn(0.88f, 1.26f)
+        val baseVolume = (0.52f + intensity * 0.30f + sfxRandom.nextFloat() * 0.07f).coerceIn(0.35f, 1f)
+        audio.playSfx(popResId, volume = baseVolume, rate = baseRate)
+
+        val layerChance = 0.30f + intensity * 0.35f
+        if (sfxRandom.nextFloat() < layerChance) {
+            val layerResId = bubblePopResIds[sfxRandom.nextInt(bubblePopResIds.size)]
+            val layerDelayMs = 7L + sfxRandom.nextInt(10).toLong()
+            val layerRate = (baseRate + 0.10f + sfxRandom.nextFloat() * 0.06f).coerceIn(0.92f, 1.38f)
+            val layerVolume = (baseVolume * 0.36f).coerceAtLeast(0.16f)
+            vb.root.postDelayed({
+                audio.playSfx(layerResId, volume = layerVolume, rate = layerRate)
+            }, layerDelayMs)
+        }
     }
 
     private fun currentCoinMultiplier(): Int {
