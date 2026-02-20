@@ -36,7 +36,7 @@
                 android:id="@+id/etSearch"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:hint="Search skins / sounds / bundles"/>
+                android:hint="Search skins / sounds"/>
         </com.google.android.material.textfield.TextInputLayout>
 
         <androidx.recyclerview.widget.RecyclerView

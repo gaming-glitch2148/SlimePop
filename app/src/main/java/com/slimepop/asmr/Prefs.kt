@@ -8,6 +8,7 @@ object Prefs {
 
     private const val K_COINS = "coins"
     private const val K_SOUND = "sound"
+    private const val K_HAPTICS = "haptics"
     private const val K_EQUIPPED_SKIN = "equipped_skin_id"
     private const val K_EQUIPPED_SOUND = "equipped_sound_id"
 
@@ -50,6 +51,9 @@ object Prefs {
 
     fun getSound(ctx: Context) = sp(ctx).getBoolean(K_SOUND, true)
     fun setSound(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean(K_SOUND, v).apply()
+
+    fun getHaptics(ctx: Context) = sp(ctx).getBoolean(K_HAPTICS, true)
+    fun setHaptics(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean(K_HAPTICS, v).apply()
 
     fun getEquippedSkinId(ctx: Context) = sp(ctx).getString(K_EQUIPPED_SKIN, "skin_ocean") ?: "skin_ocean"
     fun setEquippedSkinId(ctx: Context, v: String) = sp(ctx).edit().putString(K_EQUIPPED_SKIN, v).apply()

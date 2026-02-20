@@ -11,6 +11,7 @@ import androidx.appcompat.app.AppCompatActivity
 import com.slimepop.asmr.audio.SlimeAudioManager
 import com.slimepop.asmr.databinding.ActivityMainBinding
 import java.time.LocalDate
+import java.util.Locale
 import kotlin.random.Random
 
 class MainActivity : AppCompatActivity() {
@@ -132,6 +133,7 @@ class MainActivity : AppCompatActivity() {
         adManager.init()
 
         vb.slimeView.setSkin(equippedSkinId)
+        vb.slimeView.hapticsEnabled = Prefs.getHaptics(this)
         updateTopUI()
         updateDailyUi()
         updateBoostButtonState()
@@ -142,13 +144,15 @@ class MainActivity : AppCompatActivity() {
         }, 500)
 
         vb.btnShop.setOnClickListener {
-            val intent = Intent(this, ShopActivity::class.java).apply {
-                putExtra(ShopActivity.EXTRA_EQUIPPED_SKIN, equippedSkinId)
-                putExtra(ShopActivity.EXTRA_EQUIPPED_SOUND, equippedSoundId)
-                putExtra(ShopActivity.EXTRA_USER_COINS, coins)
-                putExtra(ShopActivity.EXTRA_OWNED_PRODUCTS_CSV, Prefs.getOwnedIapCsv(this@MainActivity))
-            }
-            shopLauncher.launch(intent)
+            openShop(initialTab = 1)
+        }
+
+        vb.btnSkins.setOnClickListener {
+            openShop(initialTab = 0)
+        }
+
+        vb.btnSettings.setOnClickListener {
+            showSettingsPanel()
         }
 
         vb.btnRemoveAds.setOnClickListener {
@@ -231,15 +235,68 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    private fun showSettingsPanel() {
+        val soundEnabled = Prefs.getSound(this)
+        val hapticsEnabled = Prefs.getHaptics(this)
+        val options = mutableListOf<String>()
+        options += if (soundEnabled) "Sound: ON (tap to mute)" else "Sound: OFF (tap to enable)"
+        options += if (hapticsEnabled) "Haptics: ON (soft pop vibration)" else "Haptics: OFF (soft pop vibration)"
+        options += "Privacy Policy"
+        if (!entitlements.adsRemoved) {
+            options += "Upgrade to PRO (Remove Ads)"
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Settings")
+            .setItems(options.toTypedArray()) { _, which ->
+                when (options[which]) {
+                    "Sound: ON (tap to mute)", "Sound: OFF (tap to enable)" -> {
+                        Prefs.setSound(this, !soundEnabled)
+                        updateSound()
+                    }
+                    "Haptics: ON (soft pop vibration)", "Haptics: OFF (soft pop vibration)" -> {
+                        val enabled = !hapticsEnabled
+                        Prefs.setHaptics(this, enabled)
+                        vb.slimeView.hapticsEnabled = enabled
+                    }
+                    "Privacy Policy" -> {
+                        startActivity(Intent(this, PrivacyActivity::class.java))
+                    }
+                    "Upgrade to PRO (Remove Ads)" -> {
+                        val launched = billing.launchPurchase(this, Catalog.REMOVE_ADS)
+                        if (!launched) {
+                            val reason = billing.checkoutBlockingReason(Catalog.REMOVE_ADS)
+                                ?: "Google Play is connecting. Try again in a moment."
+                            Toast.makeText(this, reason, Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun openShop(initialTab: Int) {
+        val intent = Intent(this, ShopActivity::class.java).apply {
+            putExtra(ShopActivity.EXTRA_EQUIPPED_SKIN, equippedSkinId)
+            putExtra(ShopActivity.EXTRA_EQUIPPED_SOUND, equippedSoundId)
+            putExtra(ShopActivity.EXTRA_USER_COINS, coins)
+            putExtra(ShopActivity.EXTRA_OWNED_PRODUCTS_CSV, Prefs.getOwnedIapCsv(this@MainActivity))
+            putExtra(ShopActivity.EXTRA_INITIAL_TAB, initialTab)
+        }
+        shopLauncher.launch(intent)
+    }
+
     private fun toggleRelaxMode(enable: Boolean) {
         isRelaxMode = enable
         vb.slimeView.isRelaxMode = enable
 
         val visibility = if (enable) View.GONE else View.VISIBLE
-        vb.tvCoins.visibility = visibility
+        vb.coinChip.visibility = visibility
         vb.tvDaily.visibility = visibility
         vb.btnDaily.visibility = visibility
         vb.btnRewardedBoost.visibility = visibility
+        vb.btnRemoveAds.visibility = visibility
 
         vb.btnRelax.text = if (enable) "Normal Mode" else "Relax Mode"
 
@@ -255,6 +312,7 @@ class MainActivity : AppCompatActivity() {
             if (enabled) android.R.drawable.ic_lock_silent_mode_off
             else android.R.drawable.ic_lock_silent_mode
         )
+        vb.btnToggleSound.alpha = if (enabled) 1f else 0.72f
         vb.btnToggleSound.contentDescription = if (enabled) "Sound on" else "Sound off"
         if (enabled) {
             val resId = SoundLibrary.soundpackResId(this, equippedSoundId)
@@ -317,17 +375,19 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateTopUI() {
         val mult = currentCoinMultiplier()
-        val multTag = if (mult > 1) " (x$mult)" else ""
-        vb.tvCoins.text = "Coins: $coins$multTag"
-        vb.tvEquipped.text = "Skin: $equippedSkinId | Sound: $equippedSoundId"
+        val multTag = if (mult > 1) " x$mult" else ""
+        vb.tvCoins.text = String.format(Locale.US, "%,d%s", coins, multTag)
+        val skinName = SkinCatalog.skins.find { it.id == equippedSkinId }?.name ?: "Default Skin"
+        val soundName = SoundCatalog.sounds.find { it.id == equippedSoundId }?.name ?: "Default Sound"
+        vb.tvEquipped.text = "$skinName • $soundName"
 
         if (entitlements.adsRemoved) {
-            vb.btnRemoveAds.text = "Ads Removed"
+            vb.btnRemoveAds.text = "PRO"
             vb.btnRemoveAds.isEnabled = false
             vb.btnRemoveAds.alpha = 0.8f
         } else {
             val ready = billing.canPurchase(Catalog.REMOVE_ADS)
-            vb.btnRemoveAds.text = if (ready) "Remove Ads" else "Remove Ads (Loading...)"
+            vb.btnRemoveAds.text = if (ready) "PRO" else "..."
             vb.btnRemoveAds.isEnabled = ready
             vb.btnRemoveAds.alpha = 1f
         }
@@ -340,17 +400,17 @@ class MainActivity : AppCompatActivity() {
         val streak = Prefs.getDailyStreak(this)
 
         vb.tvDaily.text = if (!claimedToday) {
-            "Daily ready | Streak: $streak"
+            "Fire x$streak • Daily ready"
         } else if (!adBonusToday) {
-            "Daily claimed | Bonus ad available | Streak: $streak"
+            "Fire x$streak • Bonus available"
         } else {
-            "Daily claimed | Bonus used | Streak: $streak"
+            "Fire x$streak • Completed"
         }
 
         vb.btnDaily.text = when {
-            !claimedToday -> "Claim Daily"
-            !adBonusToday -> "Daily Bonus Ad (+60%)"
-            else -> "Daily Claimed"
+            !claimedToday -> "Claim"
+            !adBonusToday -> "Bonus +60%"
+            else -> "Done"
         }
         vb.btnDaily.isEnabled = !isRelaxMode && (!claimedToday || !adBonusToday)
     }
@@ -434,7 +494,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateBoostButtonState() {
         if (isRelaxMode) {
-            vb.btnRewardedBoost.text = "Relax"
+            vb.btnRewardedBoost.text = "REST"
             vb.btnRewardedBoost.isEnabled = false
             updateTopUI()
             return
@@ -445,7 +505,7 @@ class MainActivity : AppCompatActivity() {
             vb.btnRewardedBoost.text = "${remainingSec}s"
             vb.btnRewardedBoost.isEnabled = true
         } else {
-            vb.btnRewardedBoost.text = "Boost"
+            vb.btnRewardedBoost.text = "BOOST"
             vb.btnRewardedBoost.isEnabled = true
         }
         updateTopUI()
@@ -470,6 +530,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        vb.slimeView.hapticsEnabled = Prefs.getHaptics(this)
         refreshEntitlements()
         adManager.adsEnabled = !entitlements.adsRemoved
         updateTopUI()

@@ -20,6 +20,7 @@ class SlimeView @JvmOverloads constructor(
             field = value
             invalidate()
         }
+    var hapticsEnabled: Boolean = true
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val bubblePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -97,7 +98,8 @@ class SlimeView @JvmOverloads constructor(
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         if (w > 0 && h > 0) {
             cx = w / 2f
-            cy = h / 2f
+            // Slightly lower center so the slime sits in thumb-friendly space.
+            cy = h * 0.56f
             baseRadius = min(w, h) * 0.45f
             bodyGradient = null 
             wobbleX = 0f
@@ -386,7 +388,12 @@ class SlimeView @JvmOverloads constructor(
         lastPopTime = now
 
         // Sound & Particles
-        performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+        if (hapticsEnabled) {
+            val didTick = performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            if (!didTick) {
+                performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+            }
+        }
         addParticles(x, y, if (bubble.isGolden) Color.YELLOW else Color.WHITE)
         ripples.add(Ripple(x, y, 20f, 200))
         wobbleVx += (x - cx) * 0.02f

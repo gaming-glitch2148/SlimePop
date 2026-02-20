@@ -18,6 +18,7 @@ class ShopActivity : AppCompatActivity() {
         const val EXTRA_EQUIPPED_SKIN = "equipped_skin"
         const val EXTRA_EQUIPPED_SOUND = "equipped_sound"
         const val EXTRA_USER_COINS = "user_coins"
+        const val EXTRA_INITIAL_TAB = "initial_tab"
 
         const val RESULT_EQUIP_SKIN = "equip_skin"
         const val RESULT_EQUIP_SOUND = "equip_sound"
@@ -56,6 +57,7 @@ class ShopActivity : AppCompatActivity() {
         val ownedCsv = intent.getStringExtra(EXTRA_OWNED_PRODUCTS_CSV) ?: ""
         val owned = EntitlementResolver.ownedSetFromCsv(ownedCsv)
         entitlements = EntitlementResolver.resolveFromOwnedProducts(owned)
+        activeTab = intent.getIntExtra(EXTRA_INITIAL_TAB, 0).coerceIn(0, 1)
         shopVariant = resolveOrAssignVariant()
 
         billing = BillingManager(
@@ -179,6 +181,7 @@ class ShopActivity : AppCompatActivity() {
             override fun onTabUnselected(tab: TabLayout.Tab) {}
             override fun onTabReselected(tab: TabLayout.Tab) {}
         })
+        vb.tabs.getTabAt(activeTab)?.select()
     }
 
     private fun refresh() {
