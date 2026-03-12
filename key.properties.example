@@ -1,0 +1,14 @@
+# Copy this file to key.properties and fill with your existing upload keystore values.
+# Do not commit key.properties.
+
+# Relative to project root, e.g. android.keystore or app/upload-keystore.jks
+STORE_FILE=android.keystore
+
+# Existing keystore password
+STORE_PASSWORD=
+
+# Existing key alias in that keystore
+KEY_ALIAS=
+
+# Existing key password
+KEY_PASSWORD=

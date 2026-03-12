@@ -44,6 +44,22 @@
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"/>
+
+        <Button
+            android:id="@+id/btnShopPremiumBanner"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:layout_marginStart="12dp"
+            android:layout_marginEnd="12dp"
+            android:layout_marginBottom="12dp"
+            android:background="@drawable/premium_offer_bg"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:text="PREMIUM PASS (PURCHASE) - NO ADS + 2X COINS"
+            android:textAllCaps="true"
+            android:textColor="#FFF4CE"
+            android:textSize="12sp"
+            android:textStyle="bold" />
     </LinearLayout>
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

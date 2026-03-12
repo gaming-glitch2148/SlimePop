@@ -86,20 +86,24 @@
     <Button
         android:id="@+id/btnRemoveAds"
         android:layout_width="wrap_content"
-        android:layout_height="36dp"
+        android:layout_height="42dp"
         android:layout_marginTop="14dp"
         android:layout_marginEnd="12dp"
-        android:background="@drawable/remove_ads_button_bg"
+        android:background="@drawable/premium_chip_bg"
+        android:drawableStart="@android:drawable/btn_star_big_on"
+        android:drawablePadding="5dp"
+        android:gravity="center"
         android:minWidth="0dp"
-        android:paddingStart="12dp"
-        android:paddingEnd="12dp"
-        android:text="PRO"
+        android:paddingStart="11dp"
+        android:paddingEnd="11dp"
+        android:text="BUY VIP PASS"
         android:textAllCaps="true"
-        android:textColor="#FFFFFF"
-        android:textSize="11sp"
+        android:textColor="#2F1900"
+        android:textSize="10sp"
         android:textStyle="bold"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+        app:layout_constraintTop_toTopOf="parent"
+        app:tint="#8A5200" />
 
     <LinearLayout
         android:id="@+id/bottomPanel"
@@ -155,6 +159,21 @@
             android:textColor="#D2DDF0"
             android:textSize="13sp" />
 
+    <Button
+        android:id="@+id/btnPremiumBanner"
+        android:layout_width="match_parent"
+        android:layout_height="74dp"
+        android:layout_marginTop="10dp"
+        android:background="@drawable/premium_banner_bg"
+        android:gravity="center"
+        android:paddingStart="18dp"
+        android:paddingEnd="18dp"
+        android:text="PREMIUM PASS (PURCHASE)&#10;Remove Ads + 2X Coins"
+        android:textAllCaps="true"
+        android:textColor="#FFF4C4"
+        android:textSize="19sp"
+        android:textStyle="bold" />
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -192,7 +211,7 @@
                 android:drawablePadding="4dp"
                 android:gravity="center"
                 android:padding="8dp"
-                android:text="BOOST"
+                android:text="WATCH AD&#10;BOOST"
                 android:textAllCaps="true"
                 android:textColor="#FFFFFF"
                 android:textSize="12sp"

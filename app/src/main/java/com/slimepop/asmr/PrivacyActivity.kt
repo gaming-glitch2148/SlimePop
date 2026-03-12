@@ -24,16 +24,16 @@ class PrivacyActivity : AppCompatActivity() {
             We use the information collected to:
             - Provide and maintain the game's functionality.
             - Save your progress and purchases across devices via Google Play Games.
-            - Show relevant advertisements.
+            - Show contextual advertisements.
 
             3. Local Storage
             The App stores game progress (coins, items) locally on your device and syncs it with Google Play Games Services if signed in.
 
             4. Third-Party Services
-            The App uses AdMob for ads. AdMob may use device identifiers to personalize ads. You can manage ad settings in your device's Google settings.
+            The App uses AdMob for ads. We request child-directed ad treatment and only allow non-personalized, family-appropriate ads. We do not access the Android Advertising ID.
 
             5. Children's Privacy
-            This App does not knowingly collect personal identifiable information from children under 13.
+            This App is designed for a mixed audience and may be used by children. We do not knowingly collect personal identifiable information from children under 13.
 
             6. Contact
             For any questions, contact us via the developer page on the Google Play Store.

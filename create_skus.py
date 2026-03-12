@@ -11,6 +11,8 @@ JSON_KEY_FILE = "service-account.json"
 PRICE_MICROS = 990000  # $0.99
 PURCHASE_OPTION_ID = "buy"
 CREATE_FULL_CATALOG = True
+CREATE_BUNDLES = True
+BUNDLE_COUNT = 20
 REQUEST_BATCH_SIZE = 100
 # =================================================
 
@@ -62,6 +64,16 @@ def load_premium_products_from_catalogs() -> List[Tuple[str, str, str]]:
             products.append((sku_id, name, f"Unlock the premium {name} ASMR sound."))
 
     return products
+
+
+def load_bundle_products() -> List[Tuple[str, str, str]]:
+    bundles: List[Tuple[str, str, str]] = []
+    for i in range(1, BUNDLE_COUNT + 1):
+        sku_id = f"bundle_{i:02d}"
+        title = f"Relax Pack {i:02d}"
+        description = "Bundle of 3 premium items."
+        bundles.append((sku_id, title, description))
+    return bundles
 
 
 def convert_region_prices(session: AuthorizedSession) -> Tuple[Dict, List[Dict], Dict]:
@@ -253,6 +265,9 @@ def main():
 
     if CREATE_FULL_CATALOG:
         products.extend(load_premium_products_from_catalogs())
+
+    if CREATE_BUNDLES:
+        products.extend(load_bundle_products())
 
     seen = set()
     deduped = []

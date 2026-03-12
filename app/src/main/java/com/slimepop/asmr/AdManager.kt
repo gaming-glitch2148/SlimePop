@@ -16,13 +16,27 @@ import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback
 
 class AdManager(
     private val context: Context,
-    private val activity: Activity
+    private val activity: Activity,
+    private val onAnyAdClosed: (() -> Unit)? = null
 ) {
     // TEST IDs
     private val TEST_INTERSTITIAL_ID = "ca-app-pub-3940256099942544/1033173712"
     private val TEST_REWARDED_ID = "ca-app-pub-3940256099942544/5224354917"
     private val interstitialUnitId: String
     private val rewardedUnitId: String
+    private val isDebuggable: Boolean
+    private val interstitialEnabled: Boolean
+    private var childDirected: Boolean = true
+
+    var rewardedEnabled: Boolean = true
+        set(value) {
+            field = value
+            if (!value) {
+                rewardedAd = null
+            } else if (adsEnabled) {
+                loadRewarded()
+            }
+        }
 
     private var interstitialAd: InterstitialAd? = null
     private var rewardedAd: RewardedAd? = null
@@ -34,7 +48,9 @@ class AdManager(
     private val interstitialCooldownMs = 120_000L
 
     init {
-        val isDebuggable = (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        isDebuggable = (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        // Families policy: disable interstitials in release builds.
+        interstitialEnabled = isDebuggable
         interstitialUnitId = if (isDebuggable) {
             TEST_INTERSTITIAL_ID
         } else {
@@ -54,23 +70,45 @@ class AdManager(
                 interstitialAd = null
                 rewardedAd = null
             } else {
-                loadInterstitial()
-                loadRewarded()
+                if (interstitialEnabled) {
+                    loadInterstitial()
+                }
+                if (rewardedEnabled) {
+                    loadRewarded()
+                }
             }
         }
 
     fun init() {
+        applyRequestConfiguration()
         MobileAds.initialize(context) { status ->
             Log.d("AdManager", "MobileAds initialized: $status")
         }
         if (adsEnabled) {
-            loadInterstitial()
-            loadRewarded()
+            if (interstitialEnabled) {
+                loadInterstitial()
+            }
+            if (rewardedEnabled) {
+                loadRewarded()
+            }
+        }
+    }
+
+    fun setChildDirected(isChild: Boolean) {
+        childDirected = isChild
+        applyRequestConfiguration()
+        if (adsEnabled) {
+            if (interstitialEnabled) {
+                loadInterstitial()
+            }
+            if (rewardedEnabled) {
+                loadRewarded()
+            }
         }
     }
 
     fun incrementPopAndMaybeShowInterstitial() {
-        if (!adsEnabled || !hasNetwork()) return
+        if (!adsEnabled || !hasNetwork() || !interstitialEnabled) return
         popCountSinceLastInterstitial++
         Prefs.setPopSinceInt(context, popCountSinceLastInterstitial)
 
@@ -86,7 +124,7 @@ class AdManager(
     }
 
     fun showInterstitialIfReady() {
-        if (!adsEnabled || !hasNetwork()) return
+        if (!adsEnabled || !hasNetwork() || !interstitialEnabled) return
         val ad = interstitialAd ?: run {
             loadInterstitial()
             return
@@ -97,6 +135,7 @@ class AdManager(
                 Log.d("AdManager", "Interstitial dismissed")
                 interstitialAd = null
                 loadInterstitial()
+                onAnyAdClosed?.invoke()
             }
             override fun onAdFailedToShowFullScreenContent(adError: AdError) {
                 Log.e("AdManager", "Interstitial failed to show: ${adError.message}")
@@ -112,7 +151,7 @@ class AdManager(
     }
 
     fun showRewarded(onReward: (RewardItem) -> Unit, onNotReady: () -> Unit) {
-        if (!adsEnabled || !hasNetwork()) { onNotReady(); return }
+        if (!adsEnabled || !hasNetwork() || !rewardedEnabled) { onNotReady(); return }
         val ad = rewardedAd ?: run { 
             loadRewarded()
             onNotReady()
@@ -124,6 +163,7 @@ class AdManager(
                 Log.d("AdManager", "Rewarded dismissed")
                 rewardedAd = null
                 loadRewarded()
+                onAnyAdClosed?.invoke()
             }
             override fun onAdFailedToShowFullScreenContent(adError: AdError) {
                 Log.e("AdManager", "Rewarded failed to show: ${adError.message}")
@@ -135,7 +175,7 @@ class AdManager(
     }
 
     private fun loadInterstitial() {
-        if (!adsEnabled || !hasNetwork()) return
+        if (!adsEnabled || !hasNetwork() || !interstitialEnabled) return
         val request = AdRequest.Builder().build()
         InterstitialAd.load(context, interstitialUnitId, request,
             object : InterstitialAdLoadCallback() {
@@ -152,7 +192,7 @@ class AdManager(
     }
 
     private fun loadRewarded() {
-        if (!adsEnabled || !hasNetwork()) return
+        if (!adsEnabled || !hasNetwork() || !rewardedEnabled) return
         val request = AdRequest.Builder().build()
         RewardedAd.load(context, rewardedUnitId, request,
             object : RewardedAdLoadCallback() {
@@ -166,6 +206,27 @@ class AdManager(
                 }
             }
         )
+    }
+
+    private fun applyRequestConfiguration() {
+        val requestConfig = RequestConfiguration.Builder()
+            .setTagForChildDirectedTreatment(
+                if (childDirected) {
+                    RequestConfiguration.TAG_FOR_CHILD_DIRECTED_TREATMENT_TRUE
+                } else {
+                    RequestConfiguration.TAG_FOR_CHILD_DIRECTED_TREATMENT_FALSE
+                }
+            )
+            .setTagForUnderAgeOfConsent(
+                if (childDirected) {
+                    RequestConfiguration.TAG_FOR_UNDER_AGE_OF_CONSENT_TRUE
+                } else {
+                    RequestConfiguration.TAG_FOR_UNDER_AGE_OF_CONSENT_FALSE
+                }
+            )
+            .setMaxAdContentRating(RequestConfiguration.MAX_AD_CONTENT_RATING_G)
+            .build()
+        MobileAds.setRequestConfiguration(requestConfig)
     }
 
     private fun hasNetwork(): Boolean {

@@ -3,7 +3,6 @@ package com.slimepop.asmr
 import android.content.Intent
 import android.os.Bundle
 import android.view.MenuItem
-import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.widget.doAfterTextChanged
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -102,7 +101,7 @@ class ShopActivity : AppCompatActivity() {
                     if (!launched) {
                         val reason = billing.checkoutBlockingReason(item.productId)
                             ?: "Checkout is getting ready. Try again in a second."
-                        Toast.makeText(this, reason, Toast.LENGTH_SHORT).show()
+                        Stripe.show(this, reason)
                     }
                     return@onBuy
                 }
@@ -115,7 +114,7 @@ class ShopActivity : AppCompatActivity() {
                         setResult(RESULT_OK, data)
                         finish()
                     } else {
-                        Toast.makeText(this, "Need ${coinCost - userCoins} more coins!", Toast.LENGTH_SHORT).show()
+                        Stripe.show(this, "Need ${coinCost - userCoins} more coins!")
                     }
                 } else {
                     val data = Intent().apply {
@@ -143,6 +142,10 @@ class ShopActivity : AppCompatActivity() {
             }
         )
         vb.recycler.adapter = adapter
+
+        vb.btnShopPremiumBanner.setOnClickListener {
+            launchPremiumCheckoutFromShop("shop_banner")
+        }
 
         setupTabs()
 
@@ -220,6 +223,39 @@ class ShopActivity : AppCompatActivity() {
             }
         }
         adapter.submit(merchandised)
+        updateShopPremiumBanner()
+    }
+
+    private fun updateShopPremiumBanner() {
+        if (entitlements.adsRemoved) {
+            vb.btnShopPremiumBanner.text = "VIP ACTIVE - NO ADS + 2X COINS"
+            vb.btnShopPremiumBanner.isEnabled = false
+            vb.btnShopPremiumBanner.alpha = 0.85f
+            return
+        }
+        val ready = billing.canPurchase(Catalog.REMOVE_ADS)
+        vb.btnShopPremiumBanner.text = if (ready) {
+            "PREMIUM PASS (PURCHASE) - NO ADS + 2X COINS"
+        } else {
+            "PREMIUM PASS (PURCHASE) - CHECKOUT LOADING..."
+        }
+        vb.btnShopPremiumBanner.isEnabled = ready
+        vb.btnShopPremiumBanner.alpha = if (ready) 1f else 0.7f
+    }
+
+    private fun launchPremiumCheckoutFromShop(source: String) {
+        if (entitlements.adsRemoved) {
+            Stripe.show(this, "Premium Pass is already active.")
+            return
+        }
+        val launched = billing.launchPurchase(this, Catalog.REMOVE_ADS)
+        if (!launched) {
+            val reason = billing.checkoutBlockingReason(Catalog.REMOVE_ADS)
+                ?: "Checkout is getting ready. Try again in a second."
+            Stripe.show(this, reason)
+            return
+        }
+        RevenueTelemetry.trackBuyClick(this, Catalog.REMOVE_ADS, source)
     }
 
     private fun resolveOrAssignVariant(): ShopMerchandising.Variant {
@@ -235,3 +271,4 @@ class ShopActivity : AppCompatActivity() {
         return assigned
     }
 }
+

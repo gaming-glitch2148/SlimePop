@@ -2,12 +2,16 @@ package com.slimepop.asmr
 
 import android.app.Activity
 import android.content.Intent
+import android.animation.AnimatorSet
+import android.animation.ObjectAnimator
 import android.os.Bundle
 import android.view.View
-import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import com.google.android.material.snackbar.Snackbar
 import com.slimepop.asmr.audio.SlimeAudioManager
 import com.slimepop.asmr.databinding.ActivityMainBinding
 import java.time.LocalDate
@@ -21,12 +25,15 @@ class MainActivity : AppCompatActivity() {
     private var equippedSkinId = "skin_ocean"
     private var equippedSoundId = "sound_001"
     private var isRelaxMode = false
+    private var isChildUser = true
 
     private lateinit var billing: BillingManager
     private lateinit var audio: SlimeAudioManager
     private lateinit var adManager: AdManager
     private var entitlements = EntitlementResolver.resolveFromOwnedProducts(emptySet())
     private var boostTicker: Runnable? = null
+    private var premiumPulseTicker: Runnable? = null
+    private var lastPremiumNudgeMs = 0L
     private val bubblePopResIds = intArrayOf(
         R.raw.bubble_pop_01,
         R.raw.bubble_pop_02,
@@ -72,7 +79,7 @@ class MainActivity : AppCompatActivity() {
 
                 val coinCost = Monetization.coinPriceFor(productId) ?: 0
                 if (coinCost > 0 && coins < coinCost) {
-                    Toast.makeText(this, "Need ${coinCost - coins} more coins!", Toast.LENGTH_SHORT).show()
+                    Stripe.show(this, "Need ${coinCost - coins} more coins!")
                     return@let
                 }
 
@@ -91,7 +98,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 refreshEntitlements()
                 updateTopUI()
-                Toast.makeText(this, "Unlocked ${displayNameFor(productId)}!", Toast.LENGTH_SHORT).show()
+                Stripe.show(this, "Unlocked ${displayNameFor(productId)}!")
             }
         }
     }
@@ -100,9 +107,12 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         vb = ActivityMainBinding.inflate(layoutInflater)
         setContentView(vb.root)
+        applySafeAreaInsets()
 
         audio = SlimeAudioManager(this)
-        adManager = AdManager(this, this)
+        adManager = AdManager(this, this) {
+            runOnUiThread { maybeShowPostAdPremiumUpsell() }
+        }
 
         billing = BillingManager(
             context = this,
@@ -111,6 +121,7 @@ class MainActivity : AppCompatActivity() {
                     entitlements = newEnt
                     refreshEntitlements()
                     adManager.adsEnabled = !entitlements.adsRemoved
+                    adManager.rewardedEnabled = !isChildUser && !entitlements.adsRemoved
                     updateTopUI()
                 }
             },
@@ -129,14 +140,18 @@ class MainActivity : AppCompatActivity() {
             EntitlementResolver.ownedSetFromCsv(Prefs.getOwnedIapCsv(this))
         )
 
+        isChildUser = Prefs.isChildUser(this)
+        adManager.setChildDirected(isChildUser)
         adManager.adsEnabled = !entitlements.adsRemoved
+        adManager.rewardedEnabled = !isChildUser && !entitlements.adsRemoved
         adManager.init()
 
         vb.slimeView.setSkin(equippedSkinId)
-        vb.slimeView.hapticsEnabled = Prefs.getHaptics(this)
+        syncHapticsPreference()
         updateTopUI()
         updateDailyUi()
         updateBoostButtonState()
+        ensureAgeGate()
 
         bubblePopResIds.forEach { audio.preload(it) }
         vb.root.postDelayed({
@@ -156,16 +171,11 @@ class MainActivity : AppCompatActivity() {
         }
 
         vb.btnRemoveAds.setOnClickListener {
-            if (entitlements.adsRemoved) {
-                Toast.makeText(this, "Ads are already removed.", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-            val launched = billing.launchPurchase(this, Catalog.REMOVE_ADS)
-            if (!launched) {
-                val reason = billing.checkoutBlockingReason(Catalog.REMOVE_ADS)
-                    ?: "Google Play is connecting. Try again in a moment."
-                Toast.makeText(this, reason, Toast.LENGTH_SHORT).show()
-            }
+            launchPremiumCheckout("top_chip")
+        }
+
+        vb.btnPremiumBanner.setOnClickListener {
+            launchPremiumCheckout("main_banner")
         }
 
         vb.btnToggleSound.setOnClickListener {
@@ -177,8 +187,10 @@ class MainActivity : AppCompatActivity() {
         vb.btnDaily.setOnClickListener {
             when {
                 !isDailyClaimedToday() -> claimDailyReward()
-                !hasDailyAdBonusToday() -> claimDailyAdBonus()
-                else -> Toast.makeText(this, "Daily reward already completed.", Toast.LENGTH_SHORT).show()
+                !hasDailyAdBonusToday() && !isChildUser -> claimDailyAdBonus()
+                !hasDailyAdBonusToday() && isChildUser ->
+                    Stripe.show(this, "Bonus not available for younger users.")
+                else -> Stripe.show(this, "Daily resets in ${timeUntilNextDailyReset()}.")
             }
         }
 
@@ -192,22 +204,31 @@ class MainActivity : AppCompatActivity() {
 
         vb.btnRewardedBoost.setOnClickListener {
             if (isRelaxMode) return@setOnClickListener
-            adManager.showRewarded(
-                onReward = {
-                    val now = System.currentTimeMillis()
-                    val currentUntil = Prefs.getBoostUntilMs(this)
-                    val baseUntil = maxOf(now, currentUntil)
-                    val maxAllowedUntil = now + boostMaxRemainingMs
-                    val until = (baseUntil + boostDurationMs).coerceAtMost(maxAllowedUntil)
-                    Prefs.setBoostUntilMs(this, until)
-                    updateBoostButtonState()
-                    val minutes = ((until - now) / 60_000L).coerceAtLeast(1L)
-                    Toast.makeText(this, "x$boostMultiplier coin boost active ($minutes min).", Toast.LENGTH_SHORT).show()
-                },
-                onNotReady = {
-                    Toast.makeText(this, "Rewarded ad not ready yet. Try again in a moment.", Toast.LENGTH_SHORT).show()
-                }
-            )
+            if (isChildUser) {
+                Stripe.show(this, "Not available for younger users.")
+                return@setOnClickListener
+            }
+            promptRewardedAd(
+                title = "Watch Ad",
+                message = "Watch a short ad to activate a x$boostMultiplier coin boost for 3 minutes."
+            ) {
+                adManager.showRewarded(
+                    onReward = {
+                        val now = System.currentTimeMillis()
+                        val currentUntil = Prefs.getBoostUntilMs(this)
+                        val baseUntil = maxOf(now, currentUntil)
+                        val maxAllowedUntil = now + boostMaxRemainingMs
+                        val until = (baseUntil + boostDurationMs).coerceAtMost(maxAllowedUntil)
+                        Prefs.setBoostUntilMs(this, until)
+                        updateBoostButtonState()
+                        val minutes = ((until - now) / 60_000L).coerceAtLeast(1L)
+                        Stripe.show(this, "x$boostMultiplier coin boost active ($minutes min).")
+                    },
+                    onNotReady = {
+                        Stripe.show(this, "Rewarded ad not ready yet. Try again in a moment.")
+                    }
+                )
+            }
         }
 
         vb.slimeView.onPop = { earned, holdMs ->
@@ -223,6 +244,9 @@ class MainActivity : AppCompatActivity() {
             Prefs.setTotalHoldMs(this, Prefs.getTotalHoldMs(this) + holdMs)
 
             playBubblePopSfx(holdMs)
+            if (!isRelaxMode && !entitlements.adsRemoved) {
+                adManager.incrementPopAndMaybeShowInterstitial()
+            }
         }
     }
 
@@ -235,45 +259,123 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    private fun ensureAgeGate() {
+        if (Prefs.getAgeBucket(this) != null) return
+        showAgeGateDialog()
+    }
+
+    private fun showAgeGateDialog() {
+        val options = arrayOf("Under 13", "13-15", "16-17", "18+")
+        AlertDialog.Builder(this)
+            .setTitle("Age Check")
+            .setMessage("Select your age group. This helps us show appropriate ads.")
+            .setCancelable(false)
+            .setItems(options) { _, which ->
+                val bucket = when (which) {
+                    0 -> "u13"
+                    1 -> "13_15"
+                    2 -> "16_17"
+                    else -> "18_plus"
+                }
+                Prefs.setAgeBucket(this, bucket)
+                applyAgeBucket()
+            }
+            .show()
+    }
+
+    private fun applyAgeBucket() {
+        isChildUser = Prefs.isChildUser(this)
+        adManager.setChildDirected(isChildUser)
+        adManager.rewardedEnabled = !isChildUser && !entitlements.adsRemoved
+        updateDailyUi()
+        updateBoostButtonState()
+        updateTopUI()
+    }
+
+    private fun promptRewardedAd(title: String, message: String, onAccept: () -> Unit) {
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(message)
+            .setPositiveButton("Watch Ad") { _, _ -> onAccept() }
+            .setNegativeButton("No Thanks", null)
+            .show()
+    }
+
+    private fun applySafeAreaInsets() {
+        ViewCompat.setOnApplyWindowInsetsListener(vb.root) { v, insets ->
+            val bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            )
+            v.setPadding(v.paddingLeft, bars.top, v.paddingRight, bars.bottom)
+            insets
+        }
+        ViewCompat.requestApplyInsets(vb.root)
+    }
+
+    private fun launchPremiumCheckout(source: String) {
+        if (entitlements.adsRemoved) {
+            Stripe.show(this, "Premium Pass is already active.")
+            return
+        }
+        val launched = billing.launchPurchase(this, Catalog.REMOVE_ADS)
+        if (!launched) {
+            val reason = billing.checkoutBlockingReason(Catalog.REMOVE_ADS)
+                ?: "Google Play is connecting. Try again in a moment."
+            Stripe.show(this, reason)
+            return
+        }
+        RevenueTelemetry.trackBuyClick(this, Catalog.REMOVE_ADS, source)
+    }
+
+    private fun maybeShowPostAdPremiumUpsell() {
+        if (entitlements.adsRemoved || isFinishing || isDestroyed) return
+        val now = System.currentTimeMillis()
+        if (now - lastPremiumNudgeMs < 90_000L) return
+        lastPremiumNudgeMs = now
+        Snackbar.make(
+            vb.root,
+            "Tired of ads? Go Premium for ad-free + permanent 2X coins.",
+            Snackbar.LENGTH_LONG
+        ).setAction("GO VIP") {
+            launchPremiumCheckout("post_ad_prompt")
+        }.show()
+    }
+
     private fun showSettingsPanel() {
-        val soundEnabled = Prefs.getSound(this)
-        val hapticsEnabled = Prefs.getHaptics(this)
-        val options = mutableListOf<String>()
-        options += if (soundEnabled) "Sound: ON (tap to mute)" else "Sound: OFF (tap to enable)"
-        options += if (hapticsEnabled) "Haptics: ON (soft pop vibration)" else "Haptics: OFF (soft pop vibration)"
-        options += "Privacy Policy"
+        val items = mutableListOf<Pair<String, () -> Unit>>()
+        items += (if (Prefs.getSound(this)) "Sound: ON (tap to mute)" else "Sound: OFF (tap to enable)") to {
+            Prefs.setSound(this, !Prefs.getSound(this))
+            updateSound()
+        }
+        items += (if (Prefs.getHaptics(this)) "Haptics: ON" else "Haptics: OFF") to {
+            val enabled = !Prefs.getHaptics(this)
+            setHapticsPreference(enabled)
+            Stripe.show(this, if (enabled) "Haptics enabled" else "Haptics disabled")
+        }
+        items += "Privacy Policy" to {
+            startActivity(Intent(this, PrivacyActivity::class.java))
+        }
         if (!entitlements.adsRemoved) {
-            options += "Upgrade to PRO (Remove Ads)"
+            items += "Premium Pass (No Ads + 2X Coins)" to { launchPremiumCheckout("settings_panel") }
         }
 
         AlertDialog.Builder(this)
             .setTitle("Settings")
-            .setItems(options.toTypedArray()) { _, which ->
-                when (options[which]) {
-                    "Sound: ON (tap to mute)", "Sound: OFF (tap to enable)" -> {
-                        Prefs.setSound(this, !soundEnabled)
-                        updateSound()
-                    }
-                    "Haptics: ON (soft pop vibration)", "Haptics: OFF (soft pop vibration)" -> {
-                        val enabled = !hapticsEnabled
-                        Prefs.setHaptics(this, enabled)
-                        vb.slimeView.hapticsEnabled = enabled
-                    }
-                    "Privacy Policy" -> {
-                        startActivity(Intent(this, PrivacyActivity::class.java))
-                    }
-                    "Upgrade to PRO (Remove Ads)" -> {
-                        val launched = billing.launchPurchase(this, Catalog.REMOVE_ADS)
-                        if (!launched) {
-                            val reason = billing.checkoutBlockingReason(Catalog.REMOVE_ADS)
-                                ?: "Google Play is connecting. Try again in a moment."
-                            Toast.makeText(this, reason, Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                }
+            .setItems(items.map { it.first }.toTypedArray()) { _, which ->
+                items[which].second.invoke()
             }
             .setNegativeButton("Close", null)
             .show()
+    }
+
+    private fun setHapticsPreference(enabled: Boolean) {
+        Prefs.setHaptics(this, enabled)
+        vb.slimeView.hapticsEnabled = enabled
+        vb.slimeView.isHapticFeedbackEnabled = enabled
+    }
+
+    private fun syncHapticsPreference() {
+        setHapticsPreference(Prefs.getHaptics(this))
     }
 
     private fun openShop(initialTab: Int) {
@@ -301,7 +403,7 @@ class MainActivity : AppCompatActivity() {
         vb.btnRelax.text = if (enable) "Normal Mode" else "Relax Mode"
 
         val msg = if (enable) "Relax Mode Active" else "Back to Normal Mode"
-        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+        Stripe.show(this, msg)
         updateDailyUi()
         updateBoostButtonState()
     }
@@ -370,7 +472,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun currentCoinMultiplier(): Int {
         if (isRelaxMode) return 1
-        return if (System.currentTimeMillis() < Prefs.getBoostUntilMs(this)) boostMultiplier else 1
+        var mult = if (entitlements.adsRemoved) 2 else 1
+        if (System.currentTimeMillis() < Prefs.getBoostUntilMs(this)) {
+            mult *= boostMultiplier
+        }
+        return mult
     }
 
     private fun updateTopUI() {
@@ -382,15 +488,22 @@ class MainActivity : AppCompatActivity() {
         vb.tvEquipped.text = "$skinName • $soundName"
 
         if (entitlements.adsRemoved) {
-            vb.btnRemoveAds.text = "PRO"
+            vb.btnRemoveAds.text = "VIP ACTIVE"
             vb.btnRemoveAds.isEnabled = false
-            vb.btnRemoveAds.alpha = 0.8f
+            vb.btnRemoveAds.alpha = 0.92f
+            vb.btnPremiumBanner.text = "VIP ACTIVE\nNo Ads + 2X Coins"
+            vb.btnPremiumBanner.isEnabled = false
+            vb.btnPremiumBanner.alpha = 0.86f
         } else {
             val ready = billing.canPurchase(Catalog.REMOVE_ADS)
-            vb.btnRemoveAds.text = if (ready) "PRO" else "..."
+            vb.btnRemoveAds.text = if (ready) "BUY VIP PASS" else "..."
             vb.btnRemoveAds.isEnabled = ready
             vb.btnRemoveAds.alpha = 1f
+            vb.btnPremiumBanner.text = "PREMIUM PASS (PURCHASE)\nRemove Ads + 2X Coins"
+            vb.btnPremiumBanner.isEnabled = ready
+            vb.btnPremiumBanner.alpha = if (ready) 1f else 0.7f
         }
+        updatePremiumPulseState()
     }
 
     private fun updateDailyUi() {
@@ -398,21 +511,32 @@ class MainActivity : AppCompatActivity() {
         val claimedToday = Prefs.getDailyClaimDate(this) == today
         val adBonusToday = Prefs.getDailyAdBonusDate(this) == today
         val streak = Prefs.getDailyStreak(this)
+        val canShowAdBonus = !isChildUser && !isRelaxMode
 
         vb.tvDaily.text = if (!claimedToday) {
             "Fire x$streak • Daily ready"
         } else if (!adBonusToday) {
-            "Fire x$streak • Bonus available"
+            if (canShowAdBonus) "Fire x$streak • Bonus available" else "Fire x$streak • Bonus unavailable"
         } else {
             "Fire x$streak • Completed"
         }
 
         vb.btnDaily.text = when {
             !claimedToday -> "Claim"
-            !adBonusToday -> "Bonus +60%"
-            else -> "Done"
+            !adBonusToday && canShowAdBonus -> "WATCH AD +60%"
+            !adBonusToday && !canShowAdBonus -> "Bonus unavailable"
+            else -> "Next: ${timeUntilNextDailyReset()}"
         }
-        vb.btnDaily.isEnabled = !isRelaxMode && (!claimedToday || !adBonusToday)
+        vb.btnDaily.isEnabled = !isRelaxMode && (!claimedToday || canShowAdBonus)
+    }
+
+    private fun timeUntilNextDailyReset(): String {
+        val now = java.time.LocalDateTime.now()
+        val next = now.toLocalDate().plusDays(1).atStartOfDay()
+        val minutes = java.time.Duration.between(now, next).toMinutes().coerceAtLeast(1)
+        val hoursPart = minutes / 60
+        val minsPart = minutes % 60
+        return "${hoursPart}h ${minsPart}m"
     }
 
     private fun claimDailyReward() {
@@ -422,7 +546,7 @@ class MainActivity : AppCompatActivity() {
         val todayIso = today.toString()
         val lastIso = Prefs.getDailyClaimDate(this)
         if (lastIso == todayIso) {
-            Toast.makeText(this, "Daily reward already claimed.", Toast.LENGTH_SHORT).show()
+            Stripe.show(this, "Daily reward already claimed.")
             return
         }
 
@@ -441,38 +565,47 @@ class MainActivity : AppCompatActivity() {
 
         updateDailyUi()
         updateTopUI()
-        Toast.makeText(this, "Daily +$payout coins (streak $streak)", Toast.LENGTH_SHORT).show()
+        Stripe.show(this, "Daily +$payout coins (streak $streak)")
         ReviewHelper.maybeAskForReview(this, streak, Prefs.getTotalPops(this))
     }
 
     private fun claimDailyAdBonus() {
         if (isRelaxMode) return
+        if (isChildUser) {
+            Stripe.show(this, "Bonus not available for younger users.")
+            return
+        }
         val todayIso = LocalDate.now().toString()
         if (!isDailyClaimedToday()) {
             claimDailyReward()
             return
         }
         if (hasDailyAdBonusToday()) {
-            Toast.makeText(this, "Daily bonus already claimed.", Toast.LENGTH_SHORT).show()
+            Stripe.show(this, "Daily bonus already claimed.")
             return
         }
 
-        adManager.showRewarded(
-            onReward = {
-                val base = Prefs.getDailyLastReward(this).coerceAtLeast(200)
-                val bonusBase = (base * dailyAdBonusRatio).toInt().coerceAtLeast(150)
-                val payout = bonusBase * currentCoinMultiplier()
-                coins += payout
-                Prefs.setCoins(this, coins)
-                Prefs.setDailyAdBonusDate(this, todayIso)
-                updateDailyUi()
-                updateTopUI()
-                Toast.makeText(this, "Daily bonus +$payout coins", Toast.LENGTH_SHORT).show()
-            },
-            onNotReady = {
-                Toast.makeText(this, "Rewarded ad not ready yet. Try again soon.", Toast.LENGTH_SHORT).show()
-            }
-        )
+        promptRewardedAd(
+            title = "Watch Ad",
+            message = "Watch a short ad to get a +60% daily bonus."
+        ) {
+            adManager.showRewarded(
+                onReward = {
+                    val base = Prefs.getDailyLastReward(this).coerceAtLeast(200)
+                    val bonusBase = (base * dailyAdBonusRatio).toInt().coerceAtLeast(150)
+                    val payout = bonusBase * currentCoinMultiplier()
+                    coins += payout
+                    Prefs.setCoins(this, coins)
+                    Prefs.setDailyAdBonusDate(this, todayIso)
+                    updateDailyUi()
+                    updateTopUI()
+                    Stripe.show(this, "Daily bonus +$payout coins")
+                },
+                onNotReady = {
+                    Stripe.show(this, "Rewarded ad not ready yet. Try again soon.")
+                }
+            )
+        }
     }
 
     private fun rewardForStreak(streak: Int): Int {
@@ -499,16 +632,75 @@ class MainActivity : AppCompatActivity() {
             updateTopUI()
             return
         }
+        if (isChildUser) {
+            vb.btnRewardedBoost.text = "NOT AVAILABLE"
+            vb.btnRewardedBoost.isEnabled = false
+            updateTopUI()
+            return
+        }
+        if (entitlements.adsRemoved) {
+            vb.btnRewardedBoost.text = "BOOST"
+            vb.btnRewardedBoost.isEnabled = false
+            updateTopUI()
+            return
+        }
         val remainingMs = Prefs.getBoostUntilMs(this) - System.currentTimeMillis()
         if (remainingMs > 0) {
             val remainingSec = (remainingMs / 1000L).coerceAtLeast(0L)
-            vb.btnRewardedBoost.text = "${remainingSec}s"
+            vb.btnRewardedBoost.text = "WATCH AD\n${remainingSec}s"
             vb.btnRewardedBoost.isEnabled = true
         } else {
-            vb.btnRewardedBoost.text = "BOOST"
+            vb.btnRewardedBoost.text = "WATCH AD\nBOOST"
             vb.btnRewardedBoost.isEnabled = true
         }
         updateTopUI()
+    }
+
+    private fun updatePremiumPulseState() {
+        if (entitlements.adsRemoved || isRelaxMode || isChildUser) {
+            stopPremiumPulseTicker()
+            return
+        }
+        startPremiumPulseTicker()
+    }
+
+    private fun startPremiumPulseTicker() {
+        if (premiumPulseTicker != null) return
+        val runner = object : Runnable {
+            override fun run() {
+                if (!entitlements.adsRemoved && !isRelaxMode && !isChildUser) {
+                    pulsePremiumCtaNow()
+                }
+                vb.root.postDelayed(this, 30_000L)
+            }
+        }
+        premiumPulseTicker = runner
+        vb.root.postDelayed(runner, 6_000L)
+    }
+
+    private fun stopPremiumPulseTicker() {
+        premiumPulseTicker?.let { vb.root.removeCallbacks(it) }
+        premiumPulseTicker = null
+    }
+
+    private fun pulsePremiumCtaNow() {
+        val bannerPulse = AnimatorSet().apply {
+            playTogether(
+                ObjectAnimator.ofFloat(vb.btnPremiumBanner, View.SCALE_X, 1f, 1.02f, 1f),
+                ObjectAnimator.ofFloat(vb.btnPremiumBanner, View.SCALE_Y, 1f, 1.02f, 1f),
+                ObjectAnimator.ofFloat(vb.btnPremiumBanner, View.ALPHA, 1f, 0.88f, 1f)
+            )
+            duration = 1050L
+        }
+        val chipPulse = AnimatorSet().apply {
+            playTogether(
+                ObjectAnimator.ofFloat(vb.btnRemoveAds, View.SCALE_X, 1f, 1.08f, 1f),
+                ObjectAnimator.ofFloat(vb.btnRemoveAds, View.SCALE_Y, 1f, 1.08f, 1f)
+            )
+            duration = 800L
+        }
+        bannerPulse.start()
+        chipPulse.start()
     }
 
     private fun startBoostTicker() {
@@ -530,10 +722,14 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        vb.slimeView.hapticsEnabled = Prefs.getHaptics(this)
+        syncHapticsPreference()
         refreshEntitlements()
+        isChildUser = Prefs.isChildUser(this)
+        adManager.setChildDirected(isChildUser)
         adManager.adsEnabled = !entitlements.adsRemoved
+        adManager.rewardedEnabled = !isChildUser && !entitlements.adsRemoved
         updateTopUI()
+        updatePremiumPulseState()
         audio.resumeAll()
         updateDailyUi()
         startBoostTicker()
@@ -541,6 +737,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         stopBoostTicker()
+        stopPremiumPulseTicker()
         audio.pauseAll()
         super.onPause()
     }
@@ -548,7 +745,9 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         stopBoostTicker()
+        stopPremiumPulseTicker()
         audio.release()
         billing.end()
     }
 }
+

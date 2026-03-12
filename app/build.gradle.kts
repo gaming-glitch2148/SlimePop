@@ -1,8 +1,34 @@
 @file:Suppress("DEPRECATION")
 
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+}
+
+val signingProps = Properties()
+val signingPropsFile = rootProject.file("key.properties")
+if (signingPropsFile.exists()) {
+    signingPropsFile.inputStream().use { signingProps.load(it) }
+}
+
+fun signingProp(name: String): String? {
+    return signingProps.getProperty(name)?.takeIf { it.isNotBlank() }
+        ?: System.getenv(name)?.takeIf { it.isNotBlank() }
+}
+
+val defaultStoreFile = if (rootProject.file("android.keystore").exists()) "android.keystore" else null
+val releaseStoreFile = signingProp("STORE_FILE") ?: defaultStoreFile
+val releaseStorePassword = signingProp("STORE_PASSWORD")
+val releaseKeyAlias = signingProp("KEY_ALIAS") ?: "android"
+val releaseKeyPassword = signingProp("KEY_PASSWORD") ?: releaseStorePassword
+val isReleaseTaskRequested = gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }
+if (isReleaseTaskRequested) {
+    check(!releaseStoreFile.isNullOrBlank()) { "Missing STORE_FILE for release signing. Use key.properties or env vars." }
+    check(!releaseStorePassword.isNullOrBlank()) { "Missing STORE_PASSWORD for release signing. Use key.properties or env vars." }
+    check(!releaseKeyAlias.isNullOrBlank()) { "Missing KEY_ALIAS for release signing. Use key.properties or env vars." }
+    check(!releaseKeyPassword.isNullOrBlank()) { "Missing KEY_PASSWORD for release signing. Use key.properties or env vars." }
 }
 
 android {
@@ -13,17 +39,33 @@ android {
         applicationId = "com.slimepop.asmr"
         minSdk = 23
         targetSdk = 35
-        // Incremented to 3 to resolve Play Store upgrade error
-        versionCode = 3
-        versionName = "2.1"
+        // Increment for each Play Console upload.
+        versionCode = 4
+        versionName = "2.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         manifestPlaceholders["ADMOB_APP_ID"] = "ca-app-pub-3940256099942544~3347511713"
     }
 
+    signingConfigs {
+        create("release") {
+            if (!releaseStoreFile.isNullOrBlank()
+                && !releaseStorePassword.isNullOrBlank()
+                && !releaseKeyAlias.isNullOrBlank()
+                && !releaseKeyPassword.isNullOrBlank()
+            ) {
+                storeFile = rootProject.file(releaseStoreFile)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(

@@ -32,6 +32,7 @@ object Prefs {
 
     private const val K_REVIEW_LAST_ISO = "review_last_iso"
     private const val K_SHOP_VARIANT = "shop_variant"
+    private const val K_AGE_BUCKET = "age_bucket"
 
     // Quests
     private const val K_QUEST_DATE = "quest_date"
@@ -114,4 +115,15 @@ object Prefs {
 
     fun getShopVariant(ctx: Context) = sp(ctx).getString(K_SHOP_VARIANT, null)
     fun setShopVariant(ctx: Context, v: String) = sp(ctx).edit().putString(K_SHOP_VARIANT, v).apply()
+
+    fun getAgeBucket(ctx: Context) = sp(ctx).getString(K_AGE_BUCKET, null)
+    fun setAgeBucket(ctx: Context, v: String) = sp(ctx).edit().putString(K_AGE_BUCKET, v).apply()
+
+    fun isChildUser(ctx: Context): Boolean {
+        return when (getAgeBucket(ctx)) {
+            "u13" -> true
+            "13_15", "16_17", "18_plus" -> false
+            else -> true // Unknown -> treat as child for compliance
+        }
+    }
 }

@@ -21,6 +21,10 @@ class SlimeView @JvmOverloads constructor(
             invalidate()
         }
     var hapticsEnabled: Boolean = true
+        set(value) {
+            field = value
+            isHapticFeedbackEnabled = value
+        }
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val bubblePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -388,7 +392,7 @@ class SlimeView @JvmOverloads constructor(
         lastPopTime = now
 
         // Sound & Particles
-        if (hapticsEnabled) {
+        if (hapticsEnabled && Prefs.getHaptics(context)) {
             val didTick = performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
             if (!didTick) {
                 performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
