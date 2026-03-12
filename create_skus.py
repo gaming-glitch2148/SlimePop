@@ -1,6 +1,6 @@
 import re
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 from google.auth.transport.requests import AuthorizedSession
 from google.oauth2 import service_account
@@ -8,12 +8,21 @@ from google.oauth2 import service_account
 # ================= CONFIGURATION =================
 PACKAGE_NAME = "com.slimepop.asmr"
 JSON_KEY_FILE = "service-account.json"
-PRICE_MICROS = 990000  # $0.99
 PURCHASE_OPTION_ID = "buy"
 CREATE_FULL_CATALOG = True
 CREATE_BUNDLES = True
 BUNDLE_COUNT = 20
 REQUEST_BATCH_SIZE = 100
+
+# Price tiers (USD)
+PRICE_REMOVE_ADS_MICROS = 4490000  # $4.49
+PRICE_SKIN_MICROS = 1490000       # $1.49
+PRICE_SOUND_MICROS = 1990000      # $1.99
+PRICE_BUNDLE_MICROS = 3490000     # $3.49
+PRICE_DEFAULT_MICROS = 990000     # Fallback
+
+# Update pricing for existing products (not just new).
+UPDATE_EXISTING_PRICES = True
 # =================================================
 
 ROOT = Path(__file__).resolve().parent
@@ -76,9 +85,9 @@ def load_bundle_products() -> List[Tuple[str, str, str]]:
     return bundles
 
 
-def convert_region_prices(session: AuthorizedSession) -> Tuple[Dict, List[Dict], Dict]:
+def convert_region_prices(session: AuthorizedSession, price_micros: int) -> Tuple[Dict, List[Dict], Dict]:
     url = f"{API_ROOT}/pricing:convertRegionPrices"
-    body = {"price": micros_to_money(PRICE_MICROS, "USD")}
+    body = {"price": micros_to_money(price_micros, "USD")}
 
     resp = session.post(url, json=body, timeout=60)
     if not resp.ok:
@@ -132,28 +141,60 @@ def fetch_existing_product(session: AuthorizedSession, product_id: str) -> Dict:
 
 def split_existing_and_new_products(
     session: AuthorizedSession, products: List[Tuple[str, str, str]]
-) -> Tuple[List[Tuple[str, str, str]], List[Tuple[str, str, str]]]:
-    existing: List[Tuple[str, str, str]] = []
+) -> Tuple[List[Dict], List[Tuple[str, str, str]]]:
+    existing: List[Dict] = []
     new: List[Tuple[str, str, str]] = []
 
     for sku_id, title, description in products:
         existing_product = fetch_existing_product(session, sku_id)
         if existing_product:
-            existing.append((sku_id, title, description))
+            purchase_options = existing_product.get("purchaseOptions") or []
+            option_ids = [opt.get("purchaseOptionId") for opt in purchase_options if opt.get("purchaseOptionId")]
+            if not option_ids:
+                option_ids = [PURCHASE_OPTION_ID]
+            existing.append(
+                {
+                    "sku_id": sku_id,
+                    "title": title,
+                    "description": description,
+                    "purchase_option_ids": option_ids,
+                }
+            )
         else:
             new.append((sku_id, title, description))
 
     return existing, new
 
 
-def build_batch_update_requests(
-    products: List[Tuple[str, str, str]],
-    regions_version: Dict,
-    regional_configs: List[Dict],
-    new_regions_config: Dict,
+def price_micros_for_product(product_id: str) -> int:
+    pid = product_id.lower().strip()
+    if pid == "remove_ads":
+        return PRICE_REMOVE_ADS_MICROS
+    if pid.startswith("skin_"):
+        return PRICE_SKIN_MICROS
+    if pid.startswith("sound_"):
+        return PRICE_SOUND_MICROS
+    if pid.startswith("bundle_"):
+        return PRICE_BUNDLE_MICROS
+    return PRICE_DEFAULT_MICROS
+
+
+def build_upsert_requests(
+    products: List[Dict],
+    price_configs: Dict[int, Tuple[Dict, List[Dict], Dict]],
+    allow_missing: bool,
+    include_pricing: bool,
 ) -> List[Dict]:
     requests: List[Dict] = []
-    for sku_id, title, description in products:
+    for item in products:
+        sku_id = item["sku_id"]
+        title = item["title"]
+        description = item["description"]
+        purchase_option_ids: Optional[List[str]] = item.get("purchase_option_ids")
+        if not purchase_option_ids:
+            purchase_option_ids = [PURCHASE_OPTION_ID]
+        price_micros = price_micros_for_product(sku_id)
+        regions_version, regional_configs, new_regions_config = price_configs[price_micros]
         one_time_product = {
             "packageName": PACKAGE_NAME,
             "productId": sku_id.lower().strip(),
@@ -164,53 +205,29 @@ def build_batch_update_requests(
                     "description": description[:200],
                 }
             ],
-            "purchaseOptions": [
-                {
-                    "purchaseOptionId": PURCHASE_OPTION_ID,
+        }
+        if include_pricing:
+            options = []
+            for option_id in purchase_option_ids:
+                option = {
+                    "purchaseOptionId": option_id,
                     "buyOption": {
                         "legacyCompatible": True,
                         "multiQuantityEnabled": False,
                     },
                     "regionalPricingAndAvailabilityConfigs": regional_configs,
                 }
-            ],
-        }
-        if new_regions_config:
-            one_time_product["purchaseOptions"][0]["newRegionsConfig"] = new_regions_config
+                if new_regions_config:
+                    option["newRegionsConfig"] = new_regions_config
+                options.append(option)
+            one_time_product["purchaseOptions"] = options
 
         requests.append(
             {
                 "oneTimeProduct": one_time_product,
-                "updateMask": "listings,purchaseOptions",
+                "updateMask": "listings,purchaseOptions" if include_pricing else "listings",
                 "regionsVersion": regions_version,
-                "allowMissing": True,
-                "latencyTolerance": LATENCY_TOLERANT,
-            }
-        )
-    return requests
-
-
-def build_listing_only_update_requests(
-    products: List[Tuple[str, str, str]], regions_version: Dict
-) -> List[Dict]:
-    requests: List[Dict] = []
-    for sku_id, title, description in products:
-        requests.append(
-            {
-                "oneTimeProduct": {
-                    "packageName": PACKAGE_NAME,
-                    "productId": sku_id.lower().strip(),
-                    "listings": [
-                        {
-                            "languageCode": "en-US",
-                            "title": title[:55],
-                            "description": description[:200],
-                        }
-                    ],
-                },
-                "updateMask": "listings",
-                "regionsVersion": regions_version,
-                "allowMissing": False,
+                "allowMissing": allow_missing,
                 "latencyTolerance": LATENCY_TOLERANT,
             }
         )
@@ -282,15 +299,30 @@ def main():
     print(f"Preparing {len(products)} products for package {PACKAGE_NAME}")
     existing_products, new_products = split_existing_and_new_products(session, products)
     print(f"Found {len(existing_products)} existing products, {len(new_products)} new products")
-    regions_version, regional_configs, new_regions_config = convert_region_prices(session)
+    price_points = sorted({price_micros_for_product(p[0]) for p in products})
+    price_configs: Dict[int, Tuple[Dict, List[Dict], Dict]] = {}
+    for micros in price_points:
+        price_configs[micros] = convert_region_prices(session, micros)
 
-    existing_requests = build_listing_only_update_requests(existing_products, regions_version)
+    existing_requests = build_upsert_requests(
+        existing_products,
+        price_configs,
+        allow_missing=False,
+        include_pricing=UPDATE_EXISTING_PRICES,
+    )
     if existing_requests:
         batch_upsert_products(session, existing_requests)
 
     if new_products:
-        create_requests = build_batch_update_requests(
-            new_products, regions_version, regional_configs, new_regions_config
+        new_items = [
+            {"sku_id": sku_id, "title": title, "description": description, "purchase_option_ids": [PURCHASE_OPTION_ID]}
+            for (sku_id, title, description) in new_products
+        ]
+        create_requests = build_upsert_requests(
+            new_items,
+            price_configs,
+            allow_missing=True,
+            include_pricing=True,
         )
         batch_upsert_products(session, create_requests)
         batch_activate_purchase_options(session, [p[0] for p in new_products])

@@ -40,8 +40,8 @@ android {
         minSdk = 23
         targetSdk = 35
         // Increment for each Play Console upload.
-        versionCode = 4
-        versionName = "2.2"
+        versionCode = 5
+        versionName = "2.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
