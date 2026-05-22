@@ -49,8 +49,9 @@ class AdManager(
 
     init {
         isDebuggable = (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
-        // Families policy: disable interstitials in release builds.
-        interstitialEnabled = isDebuggable
+        // Interstitials are shown in both debug and release.
+        // If you enroll in Google Play Families programme, set this back to isDebuggable.
+        interstitialEnabled = true
         interstitialUnitId = if (isDebuggable) {
             TEST_INTERSTITIAL_ID
         } else {
