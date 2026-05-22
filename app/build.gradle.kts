@@ -45,8 +45,7 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // TODO: Replace with your real AdMob App ID from https://admob.google.com → Apps → App settings
-        manifestPlaceholders["ADMOB_APP_ID"] = "ca-app-pub-3940256099942544~3347511713"
+        manifestPlaceholders["ADMOB_APP_ID"] = "ca-app-pub-9141375569651908~5596617230"
     }
 
     signingConfigs {
