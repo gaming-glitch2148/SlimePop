@@ -9,6 +9,7 @@ object Monetization {
 
     fun requiresPlayPurchase(productId: String): Boolean {
         if (productId == Catalog.REMOVE_ADS) return true
+        if (SeasonCatalog.seasons.any { it.id == productId }) return true
         if (!USE_PLAY_SKUS_FOR_CONTENT) return false
 
         val skin = SkinCatalog.skins.find { it.id == productId }
@@ -49,11 +50,12 @@ object Monetization {
         if (requiresPlayPurchase(sound.id)) "ASMR Soundscape (Premium)" else "ASMR Soundscape Unlock"
 
     fun billingProductIds(): List<String> {
-        if (!USE_PLAY_SKUS_FOR_CONTENT) return listOf(Catalog.REMOVE_ADS)
+        val seasonSkus = SeasonCatalog.seasons.map { it.id }
+        if (!USE_PLAY_SKUS_FOR_CONTENT) return listOf(Catalog.REMOVE_ADS) + seasonSkus
 
         val contentSkus = SkinCatalog.skins.filter { it.isIAP }.map { it.id } +
             SoundCatalog.sounds.filter { it.isIAP }.map { it.id }
 
-        return listOf(Catalog.REMOVE_ADS) + contentSkus
+        return listOf(Catalog.REMOVE_ADS) + seasonSkus + contentSkus
     }
 }

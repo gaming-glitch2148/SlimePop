@@ -38,6 +38,13 @@ class SlimeView @JvmOverloads constructor(
     private val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
     }
+    private val texturePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+    }
+    private val speckPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+    }
 
     private var cx = 0f
     private var cy = 0f
@@ -178,6 +185,18 @@ class SlimeView @JvmOverloads constructor(
         canvas.drawPath(slimePath, paint)
         paint.shader = null
 
+        // Subsurface scatter – pooled light from within the gel for a jelly/fluid depth feel
+        val h = skin.highlightColor
+        paint.shader = RadialGradient(
+            drawCx + effectiveRadius * 0.06f, drawCy + effectiveRadius * 0.18f,
+            effectiveRadius * 0.68f,
+            Color.argb(if (skin.isNeon) 52 else 36, Color.red(h), Color.green(h), Color.blue(h)),
+            Color.argb(0, Color.red(h), Color.green(h), Color.blue(h)),
+            Shader.TileMode.CLAMP
+        )
+        canvas.drawPath(slimePath, paint)
+        paint.shader = null
+
         if (skin.isNeon) {
             paint.color = skin.highlightColor
             paint.alpha = (40 + 25 * sin(time * 3f)).toInt().coerceIn(0, 255)
@@ -199,6 +218,8 @@ class SlimeView @JvmOverloads constructor(
 
         canvas.save()
         canvas.clipPath(slimePath)
+        drawDeepSlimeTexture(canvas, skin, drawCx, drawCy, effectiveRadius, time)
+
         val glossX = cos(time * 0.8f) * effectiveRadius * 0.04f + wobbleX * 0.15f
         val glossY = sin(time * 0.65f) * effectiveRadius * 0.03f + wobbleY * 0.1f
         glossyOvalRect.set(
@@ -219,9 +240,30 @@ class SlimeView @JvmOverloads constructor(
         highlightPaint.shader = null
         canvas.restore()
 
+        // Secondary sharp specular (upper-right counterpoint to main gloss)
+        canvas.save()
+        canvas.clipPath(slimePath)
+        val spec2X = drawCx + effectiveRadius * 0.33f + glossX * 0.5f
+        val spec2Y = drawCy - effectiveRadius * 0.29f + glossY * 0.5f
+        val spec2R = effectiveRadius * 0.080f
+        highlightPaint.shader = RadialGradient(
+            spec2X, spec2Y, spec2R,
+            Color.argb(142, 255, 255, 255),
+            Color.argb(0, 255, 255, 255),
+            Shader.TileMode.CLAMP
+        )
+        canvas.drawCircle(spec2X, spec2Y, spec2R, highlightPaint)
+        highlightPaint.shader = null
+        canvas.restore()
+
         rimPaint.strokeWidth = (effectiveRadius * 0.015f).coerceAtLeast(2.5f)
         rimPaint.color = mixColor(skin.highlightColor, Color.WHITE, 0.18f)
         rimPaint.alpha = 130
+        canvas.drawPath(slimePath, rimPaint)
+
+        rimPaint.strokeWidth = (effectiveRadius * 0.034f).coerceAtLeast(5f)
+        rimPaint.color = mixColor(skin.baseColor, Color.WHITE, if (skin.isNeon) 0.44f else 0.24f)
+        rimPaint.alpha = if (skin.isNeon) 105 else 72
         canvas.drawPath(slimePath, rimPaint)
 
         // Bubbles
@@ -233,13 +275,33 @@ class SlimeView @JvmOverloads constructor(
             val by = drawCy + b.relY * effectiveRadius
             val br = b.relR * effectiveRadius * b.growth
 
+            // Outer diffuse haze (refractive glow around bubble)
+            bubblePaint.color = if (b.isGolden) Color.argb(42, 255, 200, 0)
+            else Color.argb(18, Color.red(bubbleBaseColor), Color.green(bubbleBaseColor), Color.blue(bubbleBaseColor))
+            canvas.drawCircle(bx, by, br * 1.16f, bubblePaint)
+
+            // Main fill
             bubblePaint.color = if (b.isGolden) Color.YELLOW else bubbleBaseColor
             bubblePaint.alpha = (if (b.isGolden) 150 + (60 * b.growth).toInt() else (25 + 90 * b.growth).toInt()).coerceIn(0, 255)
             canvas.drawCircle(bx, by, br, bubblePaint)
 
+            // Primary specular (large, soft)
             bubblePaint.color = if (b.isGolden) Color.WHITE else bubbleSpecColor
             bubblePaint.alpha = (90 * b.growth).toInt().coerceIn(0, 255)
             canvas.drawCircle(bx - br * 0.25f, by - br * 0.35f, br * 0.33f, bubblePaint)
+
+            // Secondary specular (small, sharp, opposite corner)
+            bubblePaint.color = Color.WHITE
+            bubblePaint.alpha = (116 * b.growth).toInt().coerceIn(0, 255)
+            canvas.drawCircle(bx + br * 0.24f, by + br * 0.22f, br * 0.12f, bubblePaint)
+
+            // Rim stroke (glass-like edge)
+            bubblePaint.style = Paint.Style.STROKE
+            bubblePaint.strokeWidth = (br * 0.06f).coerceAtLeast(1f)
+            bubblePaint.color = if (b.isGolden) Color.WHITE else SkinCatalog.lighten(bubbleSpecColor, 0.44f)
+            bubblePaint.alpha = (66 * b.growth).toInt().coerceIn(0, 255)
+            canvas.drawCircle(bx, by, br - bubblePaint.strokeWidth * 0.5f, bubblePaint)
+            bubblePaint.style = Paint.Style.FILL
         }
 
         // Particles & Ripples
@@ -307,6 +369,111 @@ class SlimeView @JvmOverloads constructor(
             }
             slimePath.close()
         }
+    }
+
+    private fun drawDeepSlimeTexture(
+        canvas: Canvas,
+        skin: SlimeSkin,
+        centerX: Float,
+        centerY: Float,
+        radius: Float,
+        time: Float
+    ) {
+        val seed = abs(skin.id.hashCode())
+        val brightVein = mixColor(skin.highlightColor, Color.WHITE, if (skin.isNeon) 0.48f else 0.30f)
+        val deepVein = mixColor(skin.baseColor, Color.BLACK, if (skin.isNeon) 0.38f else 0.27f)
+        val shimmerColors = shimmerPaletteFor(skin)
+        val drift = time * if (isRelaxMode) 0.18f else 0.28f
+
+        texturePaint.shader = null
+        texturePaint.strokeWidth = (radius * 0.012f).coerceAtLeast(2f)
+        for (i in 0 until 9) {
+            val lane = -0.62f + i * 0.155f
+            val alpha = if (i % 2 == 0) 38 else 24
+            texturePaint.color = if (i % 2 == 0) brightVein else deepVein
+            texturePaint.alpha = alpha
+
+            val path = Path()
+            val startX = centerX - radius * 0.78f
+            val startY = centerY + radius * (lane + 0.035f * sin(drift + i * 1.7f))
+            path.moveTo(startX, startY)
+            for (step in 1..5) {
+                val t = step / 5f
+                val x = centerX - radius * 0.78f + radius * 1.56f * t
+                val wave = sin(drift * 1.6f + seed * 0.001f + i * 0.9f + t * 5.4f)
+                val y = centerY + radius * (lane + wave * 0.05f) + wobbleY * 0.035f
+                path.lineTo(x + wobbleX * 0.035f, y)
+            }
+            canvas.drawPath(path, texturePaint)
+        }
+
+        texturePaint.strokeWidth = (radius * 0.006f).coerceAtLeast(1.2f)
+        texturePaint.color = mixColor(skin.highlightColor, Color.WHITE, 0.55f)
+        texturePaint.alpha = if (skin.isNeon) 86 else 54
+        for (i in 0 until 7) {
+            val a = (seed * 0.013f + i * 0.92f + drift * 0.35f) % (2f * PI.toFloat())
+            val bandR = radius * (0.22f + i * 0.075f)
+            val left = centerX - bandR + wobbleX * 0.04f
+            val top = centerY - bandR * 0.62f + wobbleY * 0.04f
+            val right = centerX + bandR + wobbleX * 0.04f
+            val bottom = centerY + bandR * 0.62f + wobbleY * 0.04f
+            canvas.drawArc(left, top, right, bottom, a * 57.2958f, 38f, false, texturePaint)
+        }
+
+        val speckBase = if (skin.isNeon) Color.WHITE else SkinCatalog.lighten(skin.highlightColor, 0.42f)
+        for (i in 0 until 42) {
+            val localSeed = seed + i * 110351
+            val angle = ((localSeed % 6283) / 1000f) + drift * (0.08f + (i % 5) * 0.01f)
+            val dist = radius * (0.12f + ((localSeed / 7) % 760) / 1000f)
+            val sx = centerX + cos(angle) * dist + sin(drift + i) * radius * 0.012f
+            val sy = centerY + sin(angle * 0.91f) * dist * 0.82f + cos(drift * 0.8f + i) * radius * 0.01f
+            val sr = radius * (0.0045f + ((localSeed / 31) % 22) / 10000f)
+            speckPaint.color = if (i % 9 == 0) Color.WHITE else speckBase
+            speckPaint.alpha = if (i % 9 == 0) 78 else 34
+            canvas.drawCircle(sx, sy, sr.coerceAtLeast(1.1f), speckPaint)
+        }
+
+        texturePaint.style = Paint.Style.STROKE
+        texturePaint.strokeCap = Paint.Cap.ROUND
+        for (i in 0 until 18) {
+            val localSeed = seed * 31 + i * 7919
+            val angle = ((localSeed % 6283) / 1000f) + drift * 0.12f
+            val dist = radius * (0.18f + ((localSeed / 17) % 650) / 1000f)
+            val sx = centerX + cos(angle) * dist
+            val sy = centerY + sin(angle * 1.07f) * dist * 0.78f
+            val shimmerSize = radius * (0.018f + ((localSeed / 53) % 28) / 1000f)
+            val twinkle = (0.5f + 0.5f * sin(time * 1.9f + i * 0.73f)).coerceIn(0f, 1f)
+
+            texturePaint.color = shimmerColors[i % shimmerColors.size]
+            texturePaint.alpha = (42 + twinkle * if (skin.isNeon) 92 else 68).toInt().coerceIn(0, 170)
+            texturePaint.strokeWidth = (radius * 0.006f).coerceAtLeast(1.4f)
+            canvas.drawLine(sx - shimmerSize, sy, sx + shimmerSize, sy, texturePaint)
+            canvas.drawLine(sx, sy - shimmerSize * 0.62f, sx, sy + shimmerSize * 0.62f, texturePaint)
+
+            speckPaint.color = Color.WHITE
+            speckPaint.alpha = (28 + twinkle * 58).toInt().coerceIn(0, 110)
+            canvas.drawCircle(sx - shimmerSize * 0.22f, sy - shimmerSize * 0.18f, (radius * 0.006f).coerceAtLeast(1.3f), speckPaint)
+        }
+
+        paint.shader = RadialGradient(
+            centerX + radius * 0.22f + wobbleX * 0.04f,
+            centerY + radius * 0.34f + wobbleY * 0.04f,
+            radius * 0.9f,
+            Color.argb(0, 0, 0, 0),
+            Color.argb(if (skin.isNeon) 44 else 58, 0, 0, 0),
+            Shader.TileMode.CLAMP
+        )
+        canvas.drawCircle(centerX + radius * 0.14f, centerY + radius * 0.2f, radius * 0.92f, paint)
+        paint.shader = null
+    }
+
+    private fun shimmerPaletteFor(skin: SlimeSkin): IntArray {
+        val warm = mixColor(skin.highlightColor, Color.rgb(255, 211, 125), 0.38f)
+        val cool = mixColor(skin.baseColor, Color.rgb(100, 238, 255), 0.46f)
+        val rose = mixColor(skin.highlightColor, Color.rgb(255, 128, 214), 0.34f)
+        val mint = mixColor(skin.baseColor, Color.rgb(155, 255, 205), 0.40f)
+        val pearl = SkinCatalog.lighten(skin.highlightColor, if (skin.isNeon) 0.62f else 0.46f)
+        return intArrayOf(pearl, warm, cool, rose, mint)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {

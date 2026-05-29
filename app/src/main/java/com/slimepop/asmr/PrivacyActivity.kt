@@ -30,7 +30,7 @@ class PrivacyActivity : AppCompatActivity() {
             The App stores game progress (coins, items) locally on your device and syncs it with Google Play Games Services if signed in.
 
             4. Third-Party Services
-            The App uses AdMob for ads. We request child-directed ad treatment and only allow non-personalized, family-appropriate ads. We do not access the Android Advertising ID.
+            The App uses AdMob for ads. We request child-directed ad treatment for users under 13. For other users, AdMob may use device identifiers (including the Android Advertising ID) to serve and measure ads.
 
             5. Children's Privacy
             This App is designed for a mixed audience and may be used by children. We do not knowingly collect personal identifiable information from children under 13.

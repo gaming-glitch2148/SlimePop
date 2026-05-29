@@ -24,6 +24,10 @@ object EntitlementResolver {
         owned.filter { it.startsWith("bundle_") }
             .forEach { b -> ownedContent.addAll(BundleGrants.grantsFor(b)) }
 
+        // Season passes expand to their individual skin/sound grants
+        owned.filter { it.startsWith("season_") }
+            .forEach { s -> ownedContent.addAll(SeasonCatalog.grantsFor(s)) }
+
         return Entitlements(
             adsRemoved = adsRemoved,
             ownedProducts = owned,

@@ -1,5 +1,6 @@
 package com.slimepop.asmr
 
+import android.graphics.drawable.GradientDrawable
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -53,6 +54,21 @@ class ShopAdapter(
         val requiresPlay = Monetization.requiresPlayPurchase(item.productId)
         val playReady = !requiresPlay || s.canPurchase(item.productId)
         val waitingOnPlay = requiresPlay && !playReady
+
+        // Color swatch – diagonal gradient circle representing the skin or sound theme
+        val swatchGd = when (item.category) {
+            ShopCategory.SKIN -> {
+                val skin = SkinCatalog.getSkinById(item.productId)
+                GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(skin.highlightColor, skin.baseColor))
+            }
+            ShopCategory.SOUND -> {
+                val sound = SoundCatalog.getSoundById(item.productId)
+                GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(sound.swatchHighlight, sound.swatchBase))
+            }
+            else -> GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0xFF667EEA.toInt(), 0xFF764BA2.toInt()))
+        }
+        swatchGd.cornerRadius = 999f
+        h.vb.vColorSwatch.background = swatchGd
 
         h.vb.tvTitle.text = item.title
         h.vb.tvSubtitle.text = "${item.subtitle}\n${

@@ -48,6 +48,18 @@
             android:scaleType="centerInside"
             android:src="@android:drawable/ic_lock_silent_mode_off"
             app:tint="#E8ECFF" />
+
+        <ImageButton
+            android:id="@+id/btnLeaderboard"
+            android:layout_width="42dp"
+            android:layout_height="42dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/control_icon_bg"
+            android:contentDescription="Leaderboard"
+            android:padding="10dp"
+            android:scaleType="centerInside"
+            android:src="@android:drawable/btn_star_big_on"
+            app:tint="#FFD84D" />
     </LinearLayout>
 
     <LinearLayout
@@ -102,8 +114,7 @@
         android:textSize="10sp"
         android:textStyle="bold"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
-        app:tint="#8A5200" />
+        app:layout_constraintTop_toTopOf="parent" />
 
     <LinearLayout
         android:id="@+id/bottomPanel"
@@ -149,6 +160,41 @@
                 android:textSize="12sp" />
         </LinearLayout>
 
+        <LinearLayout
+            android:id="@+id/questPanel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/glass_hud_bg"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:padding="10dp">
+
+            <TextView
+                android:id="@+id/tvQuest"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:maxLines="2"
+                android:text="Quest ready"
+                android:textColor="#CFF6FF"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btnQuest"
+                android:layout_width="wrap_content"
+                android:layout_height="34dp"
+                android:background="@drawable/ad_square_button_bg"
+                android:minWidth="0dp"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:text="Quest"
+                android:textAllCaps="false"
+                android:textColor="#F3F8FF"
+                android:textSize="12sp" />
+        </LinearLayout>
+
         <TextView
             android:id="@+id/tvEquipped"
             android:layout_width="match_parent"
@@ -159,20 +205,20 @@
             android:textColor="#D2DDF0"
             android:textSize="13sp" />
 
-    <Button
-        android:id="@+id/btnPremiumBanner"
-        android:layout_width="match_parent"
-        android:layout_height="74dp"
-        android:layout_marginTop="10dp"
-        android:background="@drawable/premium_banner_bg"
-        android:gravity="center"
-        android:paddingStart="18dp"
-        android:paddingEnd="18dp"
-        android:text="PREMIUM PASS (PURCHASE)&#10;Remove Ads + 2X Coins"
-        android:textAllCaps="true"
-        android:textColor="#FFF4C4"
-        android:textSize="19sp"
-        android:textStyle="bold" />
+        <Button
+            android:id="@+id/btnPremiumBanner"
+            android:layout_width="match_parent"
+            android:layout_height="74dp"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/premium_banner_bg"
+            android:gravity="center"
+            android:paddingStart="18dp"
+            android:paddingEnd="18dp"
+            android:text="PREMIUM PASS (PURCHASE)&#10;Remove Ads + 2X Coins"
+            android:textAllCaps="true"
+            android:textColor="#FFF4C4"
+            android:textSize="19sp"
+            android:textStyle="bold" />
 
         <LinearLayout
             android:layout_width="match_parent"
