@@ -10,6 +10,7 @@ PACKAGE_NAME = "com.slimepop.asmr"
 JSON_KEY_FILE = "service-account.json"
 PURCHASE_OPTION_ID = "buy"
 CREATE_FULL_CATALOG = True
+CREATE_SEASONS = True
 CREATE_BUNDLES = True
 BUNDLE_COUNT = 20
 REQUEST_BATCH_SIZE = 100
@@ -18,6 +19,7 @@ REQUEST_BATCH_SIZE = 100
 PRICE_REMOVE_ADS_MICROS = 4490000  # $4.49
 PRICE_SKIN_MICROS = 1490000       # $1.49
 PRICE_SOUND_MICROS = 1990000      # $1.99
+PRICE_SEASON_MICROS = 3990000     # $3.99
 PRICE_BUNDLE_MICROS = 3490000     # $3.49
 PRICE_DEFAULT_MICROS = 990000     # Fallback
 
@@ -28,6 +30,7 @@ UPDATE_EXISTING_PRICES = True
 ROOT = Path(__file__).resolve().parent
 SKIN_CATALOG = ROOT / "app" / "src" / "main" / "java" / "com" / "slimepop" / "asmr" / "SkinCatalog.kt"
 SOUND_CATALOG = ROOT / "app" / "src" / "main" / "java" / "com" / "slimepop" / "asmr" / "SoundCatalog.kt"
+SEASON_CATALOG = ROOT / "app" / "src" / "main" / "java" / "com" / "slimepop" / "asmr" / "SeasonCatalog.kt"
 SCOPE = ["https://www.googleapis.com/auth/androidpublisher"]
 API_ROOT = f"https://androidpublisher.googleapis.com/androidpublisher/v3/applications/{PACKAGE_NAME}"
 LATENCY_TOLERANT = "PRODUCT_UPDATE_LATENCY_TOLERANCE_LATENCY_TOLERANT"
@@ -83,6 +86,28 @@ def load_bundle_products() -> List[Tuple[str, str, str]]:
         description = "Bundle of 3 premium items."
         bundles.append((sku_id, title, description))
     return bundles
+
+
+def load_season_products() -> List[Tuple[str, str, str]]:
+    products: List[Tuple[str, str, str]] = []
+    if not SEASON_CATALOG.exists():
+        return products
+
+    text = SEASON_CATALOG.read_text(encoding="utf-8")
+    pattern = re.compile(
+        r'id\s*=\s*"([^"]+)".*?name\s*=\s*"([^"]+)".*?tagline\s*=\s*"([^"]+)".*?'
+        r'skinIds\s*=\s*listOf\((.*?)\).*?soundIds\s*=\s*listOf\((.*?)\)',
+        re.DOTALL,
+    )
+    for match in pattern.finditer(text):
+        sku_id, name, tagline, skin_block, sound_block = match.groups()
+        skin_count = len(re.findall(r'"skin_[^"]+"', skin_block))
+        sound_count = len(re.findall(r'"sound_[^"]+"', sound_block))
+        title = f"{name} Season Pass"
+        description = f"{tagline}. Unlock {skin_count} premium skins and {sound_count} ASMR sounds."
+        products.append((sku_id, title, description))
+
+    return products
 
 
 def convert_region_prices(session: AuthorizedSession, price_micros: int) -> Tuple[Dict, List[Dict], Dict]:
@@ -174,6 +199,8 @@ def price_micros_for_product(product_id: str) -> int:
         return PRICE_SKIN_MICROS
     if pid.startswith("sound_"):
         return PRICE_SOUND_MICROS
+    if pid.startswith("season_"):
+        return PRICE_SEASON_MICROS
     if pid.startswith("bundle_"):
         return PRICE_BUNDLE_MICROS
     return PRICE_DEFAULT_MICROS
@@ -282,6 +309,9 @@ def main():
 
     if CREATE_FULL_CATALOG:
         products.extend(load_premium_products_from_catalogs())
+
+    if CREATE_SEASONS:
+        products.extend(load_season_products())
 
     if CREATE_BUNDLES:
         products.extend(load_bundle_products())

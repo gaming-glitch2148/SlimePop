@@ -159,14 +159,16 @@ class BillingManager(
 
     private fun handlePurchases(purchases: List<Purchase>, isRestore: Boolean) {
         val previousOwned = EntitlementResolver.ownedSetFromCsv(Prefs.getOwnedIapCsv(context))
-        val owned = purchases
+        val playOwned = purchases
             .filter { it.purchaseState == Purchase.PurchaseState.PURCHASED }
             .flatMap { it.products }
             .toSet()
-        val newlyOwned = owned - previousOwned
+        val localOwned = previousOwned.filterNot { Monetization.requiresPlayPurchase(it) }.toSet()
+        val owned = localOwned + playOwned
+        val newlyOwned = playOwned - previousOwned
 
         Prefs.setOwnedIapCsv(context, owned.sorted().joinToString(","))
-        Prefs.setAdsRemoved(context, owned.contains(Catalog.REMOVE_ADS))
+        Prefs.setAdsRemoved(context, playOwned.contains(Catalog.REMOVE_ADS))
 
         if (!isRestore) {
             newlyOwned.forEach { productId ->

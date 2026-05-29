@@ -35,12 +35,12 @@ class MainActivity : AppCompatActivity() {
     private var premiumPulseTicker: Runnable? = null
     private var lastPremiumNudgeMs = 0L
     private val bubblePopResIds = intArrayOf(
-        R.raw.bubble_pop_01,
-        R.raw.bubble_pop_02,
-        R.raw.bubble_pop_03,
-        R.raw.bubble_pop_04,
-        R.raw.bubble_pop_05,
-        R.raw.bubble_pop_06
+        R.raw.bubble_pop_custom,
+        R.raw.bubble_pop_custom,
+        R.raw.bubble_pop_custom,
+        R.raw.bubble_pop_custom,
+        R.raw.bubble_pop_custom,
+        R.raw.bubble_pop_custom
     )
     private val sfxRandom = Random(System.currentTimeMillis())
 
@@ -121,7 +121,7 @@ class MainActivity : AppCompatActivity() {
                     entitlements = newEnt
                     refreshEntitlements()
                     adManager.adsEnabled = !entitlements.adsRemoved
-                    adManager.rewardedEnabled = !entitlements.adsRemoved
+                    adManager.rewardedEnabled = !isChildUser && !entitlements.adsRemoved
                     updateTopUI()
                 }
             },
@@ -143,7 +143,7 @@ class MainActivity : AppCompatActivity() {
         isChildUser = Prefs.isChildUser(this)
         adManager.setChildDirected(isChildUser)
         adManager.adsEnabled = !entitlements.adsRemoved
-        adManager.rewardedEnabled = !entitlements.adsRemoved
+        adManager.rewardedEnabled = !isChildUser && !entitlements.adsRemoved
         adManager.init()
 
         vb.slimeView.setSkin(equippedSkinId)
@@ -192,7 +192,9 @@ class MainActivity : AppCompatActivity() {
         vb.btnDaily.setOnClickListener {
             when {
                 !isDailyClaimedToday() -> claimDailyReward()
-                !hasDailyAdBonusToday() -> claimDailyAdBonus()
+                !hasDailyAdBonusToday() && !isChildUser -> claimDailyAdBonus()
+                !hasDailyAdBonusToday() && isChildUser ->
+                    Stripe.show(this, "Bonus not available for younger users.")
                 else -> Stripe.show(this, "Daily resets in ${timeUntilNextDailyReset()}.")
             }
         }
@@ -211,6 +213,10 @@ class MainActivity : AppCompatActivity() {
 
         vb.btnRewardedBoost.setOnClickListener {
             if (isRelaxMode) return@setOnClickListener
+            if (isChildUser) {
+                Stripe.show(this, "Boost not available for younger users.")
+                return@setOnClickListener
+            }
             promptRewardedAd(
                 title = "Watch Ad",
                 message = "Watch a short ad to activate a x$boostMultiplier coin boost for 3 minutes."
@@ -295,7 +301,7 @@ class MainActivity : AppCompatActivity() {
     private fun applyAgeBucket() {
         isChildUser = Prefs.isChildUser(this)
         adManager.setChildDirected(isChildUser)
-        adManager.rewardedEnabled = !entitlements.adsRemoved
+        adManager.rewardedEnabled = !isChildUser && !entitlements.adsRemoved
         updateDailyUi()
         updateBoostButtonState()
         updateTopUI()
@@ -526,21 +532,23 @@ class MainActivity : AppCompatActivity() {
         val claimedToday = Prefs.getDailyClaimDate(this) == today
         val adBonusToday = Prefs.getDailyAdBonusDate(this) == today
         val streak = Prefs.getDailyStreak(this)
+        val canShowAdBonus = !isChildUser && !isRelaxMode
 
         vb.tvDaily.text = if (!claimedToday) {
             "Fire x$streak • Daily ready"
         } else if (!adBonusToday) {
-            "Fire x$streak • Bonus available"
+            if (canShowAdBonus) "Fire x$streak • Bonus available" else "Fire x$streak • Bonus unavailable"
         } else {
             "Fire x$streak • Completed"
         }
 
         vb.btnDaily.text = when {
             !claimedToday -> "Claim"
-            !adBonusToday -> "WATCH AD +60%"
+            !adBonusToday && canShowAdBonus -> "WATCH AD +60%"
+            !adBonusToday && !canShowAdBonus -> "Bonus unavailable"
             else -> "Next: ${timeUntilNextDailyReset()}"
         }
-        vb.btnDaily.isEnabled = !isRelaxMode && (!claimedToday || !adBonusToday)
+        vb.btnDaily.isEnabled = !isRelaxMode && (!claimedToday || canShowAdBonus)
     }
 
     private fun updateQuestUi() {
@@ -626,6 +634,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun claimDailyAdBonus() {
         if (isRelaxMode) return
+        if (isChildUser) {
+            Stripe.show(this, "Bonus not available for younger users.")
+            return
+        }
         val todayIso = LocalDate.now().toString()
         if (!isDailyClaimedToday()) {
             claimDailyReward()
@@ -679,6 +691,12 @@ class MainActivity : AppCompatActivity() {
     private fun updateBoostButtonState() {
         if (isRelaxMode) {
             vb.btnRewardedBoost.text = "REST"
+            vb.btnRewardedBoost.isEnabled = false
+            updateTopUI()
+            return
+        }
+        if (isChildUser) {
+            vb.btnRewardedBoost.text = "BOOST"
             vb.btnRewardedBoost.isEnabled = false
             updateTopUI()
             return
@@ -772,7 +790,7 @@ class MainActivity : AppCompatActivity() {
         isChildUser = Prefs.isChildUser(this)
         adManager.setChildDirected(isChildUser)
         adManager.adsEnabled = !entitlements.adsRemoved
-        adManager.rewardedEnabled = !entitlements.adsRemoved
+        adManager.rewardedEnabled = !isChildUser && !entitlements.adsRemoved
         updateTopUI()
         updatePremiumPulseState()
         audio.resumeAll()
